@@ -1,0 +1,13 @@
+[package]
+name = "zelen"
+version = "0.0.0"
+edition = "2024"
+description = "Selen integration with MiniZinc"
+rust-version = "1.88"
+categories = ["algorithms", "data-structures", "mathematics", "science"]
+keywords = ["csp", "constraint-solver", "solver", "minizinc", "constraint"]
+license = "MIT"
+homepage = "https://github.com/radevgit/zelen"
+repository = "https://github.com/radevgit/zelen"
+documentation = "https://docs.rs/zelen"
+readme = "README.md"
