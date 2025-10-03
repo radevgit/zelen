@@ -24,15 +24,12 @@ pub trait FlatZincModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
     /// use zelen::prelude::*;
     ///
-    /// // Configure model first
-    /// let mut model = Model::default()
-    ///     .with_timeout_seconds(30);
-    ///
-    /// model.from_flatzinc_file("problem.fzn")?;
-    /// let solution = model.solve()?;
+    /// let mut model = Model::default();
+    /// model.from_flatzinc_file("problem.fzn").unwrap();
+    /// let solution = model.solve().unwrap();
     /// ```
     fn from_flatzinc_file<P: AsRef<Path>>(&mut self, path: P) -> FlatZincResult<()>;
 
@@ -51,7 +48,7 @@ pub trait FlatZincModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
     /// use zelen::prelude::*;
     ///
     /// let fzn = r#"
@@ -62,8 +59,8 @@ pub trait FlatZincModel {
     /// "#;
     ///
     /// let mut model = Model::default();
-    /// model.from_flatzinc_str(fzn)?;
-    /// let solution = model.solve()?;
+    /// model.from_flatzinc_str(fzn).unwrap();
+    /// let solution = model.solve().unwrap();
     /// ```
     fn from_flatzinc_str(&mut self, content: &str) -> FlatZincResult<()>;
 
@@ -75,7 +72,7 @@ pub trait FlatZincModel {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
     /// use zelen::prelude::*;
     ///
     /// let fzn = r#"
@@ -85,11 +82,19 @@ pub trait FlatZincModel {
     /// "#;
     ///
     /// let mut model = Model::default();
-    /// let context = model.load_flatzinc_str(fzn)?;
+    /// let context = model.load_flatzinc_str(fzn).unwrap();
+    /// 
+    /// // Context contains variable name mappings
+    /// assert!(context.var_names.values().any(|name| name == "x"));
     /// 
     /// match model.solve() {
-    ///     Ok(solution) => context.print_solution(&solution),
-    ///     Err(_) => context.print_unsatisfiable(),
+    ///     Ok(_solution) => {
+    ///         // Solution found! In a real application, you would
+    ///         // use OutputFormatter to format the solution.
+    ///     }
+    ///     Err(_) => {
+    ///         // No solution
+    ///     }
     /// }
     /// ```
     fn load_flatzinc_str(&mut self, content: &str) -> FlatZincResult<FlatZincContext>;
