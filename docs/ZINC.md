@@ -1,7 +1,12 @@
+https://docs.minizinc.dev/en/stable/flattening.html
+https://docs.minizinc.dev/en/stable/fzn-spec.html
+
+
+
 ## 4. Implementation Plan: Steps for FlatZinc Import
 
 ### Step 1: Scaffolding and Setup
-- Create `/src/zinc/` directory and initial module files (`mod.rs`, `parser.rs`, `ast.rs`, `error.rs`).
+- module files (`mod.rs`, `parser.rs`, `ast.rs`, `error.rs`).
 - Define `ZincImportError` error type.
 - Add public API stubs for `import_flatzinc_file` and `import_flatzinc_str`.
 
@@ -227,3 +232,5 @@ solve satisfy;
 - More global constraints.
 - Objective functions (minimize/maximize).
 - Full MiniZinc grammar coverage.
+
+Integrated project: https://github.com/glklimmer/oxiflex

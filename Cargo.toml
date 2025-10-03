@@ -1,11 +1,11 @@
 [package]
 name = "zelen"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
-description = "Selen integration with MiniZinc"
+description = "Selen CSP solver parser for FlatZinc"
 rust-version = "1.88"
-categories = ["algorithms", "data-structures", "mathematics", "science"]
-keywords = ["csp", "constraint-solver", "solver", "minizinc", "constraint"]
+categories = ["algorithms", "parser-implementations", "mathematics"]
+keywords = ["flatzinc", "minizinc", "constraint-solver", "csp", "parser"]
 license = "MIT"
 homepage = "https://github.com/radevgit/zelen"
 repository = "https://github.com/radevgit/zelen"
@@ -17,7 +17,8 @@ readme = "README.md"
 crate-type = ["lib"]
 
 [dependencies]
-
+# Use local path during development
+selen = { version = "0.9", path = "../selen" }
 
 [dev-dependencies]
 
