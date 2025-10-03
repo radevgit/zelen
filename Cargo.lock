@@ -10,7 +10,7 @@ checksum = "e6a1454af5d1523333cd80d13fb7168b069d5605af9ed88247e6e1aee96ec7dc"
 
 [[package]]
 name = "zelen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "selen",
 ]

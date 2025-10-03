@@ -1,6 +1,6 @@
 [package]
 name = "zelen"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Selen CSP solver parser for FlatZinc"
 rust-version = "1.88"
@@ -11,6 +11,11 @@ homepage = "https://github.com/radevgit/zelen"
 repository = "https://github.com/radevgit/zelen"
 documentation = "https://docs.rs/zelen"
 readme = "README.md"
+
+[package.metadata.docs.rs]
+# docs.rs configuration
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
 
 
 [lib]
