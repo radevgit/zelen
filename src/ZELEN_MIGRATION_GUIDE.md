@@ -85,7 +85,7 @@ selen/docs/development/ZINC.md         → zelen/docs/FLATZINC.md
 
 1. **Copy FlatZinc source code:**
 ```bash
-cd /home/ross/devpublic
+cd ~/devpublic
 cp -r selen/src/flatzinc/* zelen/src/
 rm zelen/src/mapper_old_backup.rs  # Remove backup file
 ```

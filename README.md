@@ -27,7 +27,42 @@ zelen = "0.1"
 
 ## Quick Start
 
-### From FlatZinc String
+### Recommended API: FlatZincSolver
+
+The easiest way to use Zelen is with the `FlatZincSolver` - it provides automatic FlatZinc-compliant output:
+
+```rust
+use zelen::prelude::*;
+
+let fzn = r#"
+    var 1..10: x;
+    var 1..10: y;
+    constraint int_eq(x, 5);
+    constraint int_plus(x, y, 12);
+    solve satisfy;
+"#;
+
+let mut solver = FlatZincSolver::new();
+solver.load_str(fzn)?;
+solver.solve()?;
+
+// Automatic FlatZinc-compliant output with statistics
+print!("{}", solver.to_flatzinc());
+// Outputs:
+// x = 5;
+// y = 7;
+// ----------
+// ==========
+// %%%mzn-stat: solutions=1
+// %%%mzn-stat: nodes=0
+// %%%mzn-stat: propagations=0
+// %%%mzn-stat: solveTime=0.001
+// %%%mzn-stat-end
+```
+
+### Low-Level API: Direct Model Integration
+
+For more control, use the Model integration API:
 
 ```rust
 use zelen::prelude::*;
@@ -103,54 +138,59 @@ if let Ok(solution) = model.solve() {
 }
 ```
 
-### FlatZinc-Compliant Output
+### Configurable Output and Statistics
 
-Zelen provides a formatter to output solutions according to the FlatZinc specification:
+Control statistics and solution enumeration:
 
 ```rust
 use zelen::prelude::*;
-use zelen::output::format_solution;
-use std::collections::HashMap;
 
-let fzn = r#"
-    var 1..10: x;
-    var 1..10: y;
-    constraint int_eq(x, 5);
-    constraint int_eq(y, 3);
-    solve satisfy;
-"#;
+let fzn = "var 1..10: x; solve satisfy;";
 
-let mut model = Model::default();
-model.from_flatzinc_str(fzn)?;
+// Configure solver options
+let mut solver = FlatZincSolver::new();
+solver.with_statistics(true);       // Enable/disable statistics
+solver.max_solutions(3);            // Find up to 3 solutions
+solver.find_all_solutions();        // Find all solutions
 
-match model.solve() {
-    Ok(solution) => {
-        // Get variable names from the parser (you'd track these during parsing)
-        let var_names = HashMap::from([
-            (x_var_id, "x".to_string()),
-            (y_var_id, "y".to_string()),
-        ]);
-        
-        // Format according to FlatZinc spec
-        let output = format_solution(&solution, &var_names);
-        print!("{}", output);
-        // Outputs:
-        // x = 5;
-        // y = 3;
-        // ----------
-    }
-    Err(_) => {
-        println!("{}", zelen::output::format_no_solution());
-        // Outputs: =====UNSATISFIABLE=====
-    }
-}
+solver.load_str(fzn)?;
+solver.solve()?;
+
+// Get formatted output
+let output = solver.to_flatzinc();  // Returns String
+solver.print_flatzinc();            // Prints directly
+
+// Access solutions programmatically
+let count = solver.solution_count();
+let solution = solver.get_solution(0);
 ```
 
-The output format follows the [FlatZinc specification](https://docs.minizinc.dev/en/stable/fzn-spec.html#output):
-- Each variable assignment on its own line: `varname = value;`
-- Separator line `----------` marks the end of a solution
-- `=====UNSATISFIABLE=====` when no solution exists
-- `=====UNKNOWN=====` when satisfiability cannot be determined
+### FlatZinc Specification Compliance
+
+Zelen follows the [FlatZinc specification](https://docs.minizinc.dev/en/stable/fzn-spec.html#output) exactly:
+
+**Output Format:**
+- Variable assignments: `varname = value;`
+- Solution separator: `----------`
+- Search complete: `==========`
+- Unsatisfiable: `=====UNSATISFIABLE=====`
+
+**Statistics Format** (optional, configurable):
+```
+%%%mzn-stat: solutions=1
+%%%mzn-stat: nodes=10
+%%%mzn-stat: failures=0
+%%%mzn-stat: propagations=21
+%%%mzn-stat: variables=4
+%%%mzn-stat: propagators=1
+%%%mzn-stat: solveTime=0.001
+%%%mzn-stat: peakMem=1.00
+%%%mzn-stat-end
+```
+
+All statistics are automatically extracted from Selen's solver:
+- **Standard** (FlatZinc spec): solutions, nodes, failures, solveTime (seconds), peakMem (MB)
+- **Extended**: propagations, variables, propagators
 
 ## Using with MiniZinc
 
@@ -219,17 +259,32 @@ Zelen has been tested on 851 real-world FlatZinc files from the OR-Tools test su
 
 ## Examples
 
-Check the `examples/` directory for more complete examples:
+The repository includes comprehensive examples demonstrating different aspects of the library:
 
+### Basic Usage
+- **`simple_usage.rs`** - Basic constraint solving with FlatZincContext API
+- **`clean_api.rs`** - High-level FlatZincSolver API with automatic output formatting
+- **`solver_demo.rs`** - Demonstrates solving various constraint problem types
+
+### FlatZinc Integration
+- **`flatzinc_simple.rs`** - Simple FlatZinc model solving
+- **`flatzinc_output.rs`** - FlatZinc-compliant output formatting
+
+### Multiple Solutions & Configuration
+- **`multiple_solutions.rs`** - Enumerate multiple solutions with configurable limits
+- **`spec_compliance.rs`** - FlatZinc specification compliance demonstration
+- **`optimization_test.rs`** - Minimize/maximize with optimal and intermediate solutions
+
+### Statistics & Monitoring
+- **`enhanced_statistics.rs`** - All available solver statistics from Selen
+- **`statistics_units.rs`** - Statistics unit verification (seconds, megabytes)
+
+Run any example with:
 ```bash
-# Basic FlatZinc parsing and solving
-cargo run --example flatzinc_simple
-
-# FlatZinc-compliant output formatting
-cargo run --example flatzinc_output
-
-# Complete solver demo with multiple problem types
-cargo run --example solver_demo
+cargo run --example <name>
+# For instance:
+cargo run --example clean_api
+cargo run --example multiple_solutions
 ```
 
 ## Testing

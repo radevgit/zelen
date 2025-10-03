@@ -1,6 +1,6 @@
 //! Example: Simple FlatZinc test
 
-use selen::prelude::*;
+use zelen::prelude::*;
 
 fn main() {
     // Test 1: Simple variable declaration

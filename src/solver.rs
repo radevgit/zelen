@@ -1,0 +1,293 @@
+//! FlatZinc Solver Wrapper
+//!
+//! Provides a high-level Model wrapper with automatic FlatZinc output formatting.
+
+use crate::ast::{SolveGoal, FlatZincModel};
+use crate::output::{OutputFormatter, SearchType, SolveStatistics};
+use crate::{tokenizer, parser, FlatZincResult, FlatZincError};
+use crate::mapper::map_to_model_with_context;
+use selen::prelude::*;
+use selen::variables::Val;
+use std::collections::HashMap;
+use std::fs;
+use std::time::{Duration, Instant};
+
+/// Context information from FlatZinc model mapping
+#[derive(Debug, Clone)]
+pub struct FlatZincContext {
+    pub var_names: HashMap<VarId, String>,
+    pub name_to_var: HashMap<String, VarId>,
+    pub arrays: HashMap<String, Vec<VarId>>,
+    pub solve_goal: SolveGoal,
+}
+
+/// Solver options for configuring behavior
+#[derive(Debug, Clone)]
+pub struct SolverOptions {
+    /// Whether to find all solutions (satisfaction problems only)
+    pub find_all_solutions: bool,
+    /// Maximum number of solutions to find (None = unlimited)
+    pub max_solutions: Option<usize>,
+    /// Whether to include statistics in output
+    pub include_statistics: bool,
+}
+
+impl Default for SolverOptions {
+    fn default() -> Self {
+        Self {
+            find_all_solutions: false,
+            max_solutions: Some(1),
+            include_statistics: true,
+        }
+    }
+}
+
+/// High-level FlatZinc solver with automatic output formatting
+pub struct FlatZincSolver {
+    model: Option<Model>,
+    context: Option<FlatZincContext>,
+    solutions: Vec<Solution>,
+    solve_time: Option<Duration>,
+    options: SolverOptions,
+}
+
+impl FlatZincSolver {
+    /// Create a new empty FlatZinc solver with default options
+    pub fn new() -> Self {
+        Self::with_options(SolverOptions::default())
+    }
+
+    /// Create a new solver with custom options
+    pub fn with_options(options: SolverOptions) -> Self {
+        Self {
+            model: Some(Model::default()),
+            context: None,
+            solutions: Vec::new(),
+            solve_time: None,
+            options,
+        }
+    }
+
+    /// Configure to find all solutions (for satisfaction problems)
+    pub fn find_all_solutions(&mut self) -> &mut Self {
+        self.options.find_all_solutions = true;
+        self.options.max_solutions = None;
+        self
+    }
+
+    /// Set maximum number of solutions to find
+    pub fn max_solutions(&mut self, n: usize) -> &mut Self {
+        self.options.max_solutions = Some(n);
+        self.options.find_all_solutions = false;
+        self
+    }
+
+    /// Configure whether to include statistics in output
+    pub fn with_statistics(&mut self, enable: bool) -> &mut Self {
+        self.options.include_statistics = enable;
+        self
+    }
+
+    /// Load a FlatZinc problem from a string
+    pub fn load_str(&mut self, fzn: &str) -> FlatZincResult<()> {
+        let tokens = tokenizer::tokenize(fzn)?;
+        let ast = parser::parse(tokens)?;
+        
+        let model = self.model.as_mut().expect("Model already consumed by solve()");
+        self.context = Some(map_to_model_with_context(ast, model)?);
+        Ok(())
+    }
+
+    /// Load a FlatZinc problem from a file
+    pub fn load_file(&mut self, path: &str) -> FlatZincResult<()> {
+        let content = fs::read_to_string(path)
+            .map_err(|e| FlatZincError::IoError(format!("Failed to read file: {}", e)))?;
+        self.load_str(&content)
+    }
+
+    /// Solve the problem (satisfaction or optimization)
+    /// 
+    /// For satisfaction problems:
+    /// - By default, finds one solution
+    /// - Use `find_all_solutions()` to find all solutions
+    /// - Use `max_solutions(n)` to find up to n solutions
+    /// 
+    /// For optimization problems:
+    /// - Finds the optimal solution
+    /// - Intermediate solutions are collected if multiple solutions requested
+    pub fn solve(&mut self) -> Result<(), ()> {
+        let start = Instant::now();
+        let model = self.model.take().expect("Model already consumed by solve()");
+        let context = self.context.as_ref().expect("No context available");
+        
+        self.solutions.clear();
+        
+        match &context.solve_goal {
+            SolveGoal::Satisfy { .. } => {
+                // Satisfaction problem - use enumerate
+                if self.options.find_all_solutions || self.options.max_solutions.map_or(false, |n| n > 1) {
+                    // Collect multiple solutions
+                    let max = self.options.max_solutions.unwrap_or(usize::MAX);
+                    self.solutions = model.enumerate().take(max).collect();
+                } else {
+                    // Single solution
+                    if let Ok(solution) = model.solve() {
+                        self.solutions.push(solution);
+                    }
+                }
+            }
+            SolveGoal::Minimize { objective, .. } => {
+                // Minimization problem
+                let obj_var = Self::get_objective_var(objective, context)?;
+                
+                if self.options.find_all_solutions || self.options.max_solutions.map_or(false, |n| n > 1) {
+                    // Collect intermediate solutions
+                    let max = self.options.max_solutions.unwrap_or(usize::MAX);
+                    self.solutions = model.minimize_and_iterate(obj_var).take(max).collect();
+                } else {
+                    // Just the optimal solution
+                    if let Ok(solution) = model.minimize(obj_var) {
+                        self.solutions.push(solution);
+                    }
+                }
+            }
+            SolveGoal::Maximize { objective, .. } => {
+                // Maximization problem
+                let obj_var = Self::get_objective_var(objective, context)?;
+                
+                if self.options.find_all_solutions || self.options.max_solutions.map_or(false, |n| n > 1) {
+                    // Collect intermediate solutions
+                    let max = self.options.max_solutions.unwrap_or(usize::MAX);
+                    self.solutions = model.maximize_and_iterate(obj_var).take(max).collect();
+                } else {
+                    // Just the optimal solution
+                    if let Ok(solution) = model.maximize(obj_var) {
+                        self.solutions.push(solution);
+                    }
+                }
+            }
+        }
+        
+        self.solve_time = Some(start.elapsed());
+        
+        if self.solutions.is_empty() {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Get the number of solutions found
+    pub fn solution_count(&self) -> usize {
+        self.solutions.len()
+    }
+
+    /// Get a reference to a specific solution (0-indexed)
+    pub fn get_solution(&self, index: usize) -> Option<&Solution> {
+        self.solutions.get(index)
+    }
+
+    /// Extract objective variable from expression
+    fn get_objective_var(expr: &crate::ast::Expr, context: &FlatZincContext) -> Result<VarId, ()> {
+        use crate::ast::Expr;
+        
+        match expr {
+            Expr::Ident(name) => {
+                context.name_to_var.get(name)
+                    .copied()
+                    .ok_or(())
+            }
+            _ => Err(()) // Only support simple variable references for now
+        }
+    }
+
+    /// Format the result as FlatZinc output
+    /// 
+    /// Outputs all solutions found, each terminated with `----------`
+    /// If search completed, outputs `==========` at the end
+    pub fn to_flatzinc(&self) -> String {
+        if self.solutions.is_empty() {
+            return self.format_unsatisfiable();
+        }
+
+        let mut output = String::new();
+        
+        // Output each solution
+        for (i, solution) in self.solutions.iter().enumerate() {
+            output.push_str(&self.format_solution(solution, i == self.solutions.len() - 1));
+        }
+        
+        output
+    }
+
+    /// Print the FlatZinc output
+    pub fn print_flatzinc(&self) {
+        print!("{}", self.to_flatzinc());
+    }
+
+    fn format_solution(&self, solution: &Solution, is_last: bool) -> String {
+        let context = self.context.as_ref().expect("No context loaded");
+        
+        // Build solution HashMap for OutputFormatter
+        let solution_map: HashMap<VarId, Val> = context.var_names
+            .keys()
+            .map(|var_id| (*var_id, solution[*var_id]))
+            .collect();
+        
+        // Determine search type
+        let search_type = match &context.solve_goal {
+            SolveGoal::Satisfy { .. } => SearchType::Satisfy,
+            SolveGoal::Minimize { .. } => SearchType::Minimize,
+            SolveGoal::Maximize { .. } => SearchType::Maximize,
+        };
+        
+        // Create formatter
+        let mut formatter = OutputFormatter::new(search_type);
+        
+        // Add statistics if enabled and available
+        if self.options.include_statistics && is_last {
+            // Extract statistics from Selen's Solution
+            let selen_stats = &solution.stats;
+            
+            let stats = SolveStatistics {
+                solutions: self.solutions.len(),
+                nodes: selen_stats.node_count,
+                failures: 0, // TODO: Selen doesn't expose failure count yet
+                propagations: Some(selen_stats.propagation_count),
+                solve_time: Some(selen_stats.solve_time),
+                peak_memory_mb: Some(selen_stats.peak_memory_mb),
+                variables: Some(selen_stats.variable_count),
+                propagators: Some(selen_stats.constraint_count),
+            };
+            formatter = formatter.with_statistics(stats);
+        }
+        
+        // Format solution
+        let mut output = formatter.format_solution(&solution_map, &context.var_names);
+        
+        // Add search complete marker after last solution
+        if is_last {
+            output.push_str(&formatter.format_search_complete());
+        }
+        
+        output
+    }
+
+    fn format_unsatisfiable(&self) -> String {
+        let context = self.context.as_ref().expect("No context loaded");
+        let search_type = match &context.solve_goal {
+            SolveGoal::Satisfy { .. } => SearchType::Satisfy,
+            SolveGoal::Minimize { .. } => SearchType::Minimize,
+            SolveGoal::Maximize { .. } => SearchType::Maximize,
+        };
+        
+        let formatter = OutputFormatter::new(search_type);
+        formatter.format_unsatisfiable()
+    }
+}
+
+impl Default for FlatZincSolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}

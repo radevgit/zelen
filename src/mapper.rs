@@ -512,6 +512,9 @@ fn infer_unbounded_int_bounds(ast: &FlatZincModel) -> (i32, i32) {
     }
 }
 
+// Re-export FlatZincContext from solver module
+pub use crate::solver::FlatZincContext;
+
 /// Map FlatZinc AST to an existing Selen Model
 pub fn map_to_model_mut(ast: FlatZincModel, model: &mut Model) -> FlatZincResult<()> {
     // First pass: infer reasonable bounds for unbounded variables
@@ -532,6 +535,43 @@ pub fn map_to_model_mut(ast: FlatZincModel, model: &mut Model) -> FlatZincResult
     // TODO: Handle solve goal (minimize/maximize)
     
     Ok(())
+}
+
+/// Map FlatZinc AST to an existing Selen Model, returning context information
+pub fn map_to_model_with_context(ast: FlatZincModel, model: &mut Model) -> FlatZincResult<FlatZincContext> {
+    // First pass: infer reasonable bounds for unbounded variables
+    let unbounded_bounds = infer_unbounded_int_bounds(&ast);
+    
+    let mut ctx = MappingContext::new(model, unbounded_bounds);
+    
+    // Map variable declarations
+    for var_decl in &ast.var_decls {
+        ctx.map_var_decl(var_decl)?;
+    }
+    
+    // Map constraints
+    for constraint in &ast.constraints {
+        ctx.map_constraint(constraint)?;
+    }
+    
+    // TODO: Handle solve goal (minimize/maximize)
+    
+    // Build FlatZincContext
+    let var_names: HashMap<VarId, String> = ctx.var_map
+        .iter()
+        .map(|(name, &id)| (id, name.clone()))
+        .collect();
+    
+    let name_to_var: HashMap<String, VarId> = ctx.var_map.clone();
+    
+    let arrays: HashMap<String, Vec<VarId>> = ctx.array_map.clone();
+    
+    Ok(FlatZincContext {
+        var_names,
+        name_to_var,
+        arrays,
+        solve_goal: ast.solve_goal,
+    })
 }
 
 /// Map FlatZinc AST to a new Selen Model

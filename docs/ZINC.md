@@ -1,5 +1,7 @@
-https://docs.minizinc.dev/en/stable/flattening.html
-https://docs.minizinc.dev/en/stable/fzn-spec.html
+# FlatZinc Documentation
+
+- Flattening: https://docs.minizinc.dev/en/stable/flattening.html
+- FlatZinc Specification: https://docs.minizinc.dev/en/stable/fzn-spec.html
 
 
 
@@ -121,11 +123,11 @@ pub fn import_flatzinc_str(input: &str) -> Result<Model, ZincImportError>;
 
 ## 2. MiniZinc and FlatZinc Standards and References
 
-- **MiniZinc Language Reference (2.8.4):**  
-	- [MiniZinc 2.8.4 Language Reference](https://www.minizinc.org/doc-2.8.4/en/index.html)
+- **MiniZinc Language Reference:**  
+	- [MiniZinc Language Reference](https://docs.minizinc.dev/en/stable/)
 	- [MiniZinc Grammar (BNF)](https://github.com/MiniZinc/libminizinc/blob/master/doc/grammar/minizinc.bnf)
-- **FlatZinc Specification (2.8.4):**  
-	- [FlatZinc 2.8.4 Specification](https://www.minizinc.org/doc-2.8.4/en/fzn-spec.html)
+- **FlatZinc Specification:**  
+	- [FlatZinc Specification](https://docs.minizinc.dev/en/stable/fzn-spec.html)
 - **File Types:**  
 	- `.mzn` — Model files (constraints, variables, parameters)
 	- `.dzn` — Data files (parameter assignments)
@@ -199,11 +201,11 @@ pub fn import_flatzinc_str(input: &str) -> Result<Model, ZincImportError>;
 
 ## 5. References and Resources
 
-- [MiniZinc 2.8.4 Language Reference](https://www.minizinc.org/doc-2.8.4/en/index.html)
+- [MiniZinc Language Reference](https://docs.minizinc.dev/en/stable/)
 - [MiniZinc BNF Grammar](https://github.com/MiniZinc/libminizinc/blob/master/doc/grammar/minizinc.bnf)
-- [FlatZinc 2.8.4 Specification](https://www.minizinc.org/doc-2.8.4/en/fzn-spec.html)
-- [MiniZinc Example Models](https://www.minizinc.org/examples.html)
-- [MiniZinc Standard Library](https://www.minizinc.org/doc-2.8.4/en/lib-globals.html)
+- [FlatZinc Specification](https://docs.minizinc.dev/en/stable/fzn-spec.html)
+- [MiniZinc Example Models](https://www.minizinc.org/software/)
+- [MiniZinc Standard Library](https://docs.minizinc.dev/en/stable/lib-globals.html)
 
 ---
 

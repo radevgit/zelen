@@ -18,6 +18,7 @@ pub mod tokenizer;
 pub mod parser;
 pub mod mapper;
 pub mod output;
+pub mod solver;
 pub mod integration;
 
 pub use error::{FlatZincError, FlatZincResult};
@@ -29,6 +30,8 @@ pub use selen;
 pub mod prelude {
     pub use crate::error::{FlatZincError, FlatZincResult};
     pub use crate::integration::*;
+    pub use crate::output::{OutputFormatter, SearchType, SolveStatistics};
+    pub use crate::solver::{FlatZincContext, FlatZincSolver, SolverOptions};
     pub use selen::prelude::*;
 }
 

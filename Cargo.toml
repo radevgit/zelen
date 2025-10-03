@@ -17,8 +17,7 @@ readme = "README.md"
 crate-type = ["lib"]
 
 [dependencies]
-# Use local path during development
-selen = { version = "0.9", path = "../selen" }
+selen = "0.9"
 
 [dev-dependencies]
 

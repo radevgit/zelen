@@ -14,7 +14,7 @@ This document provides a high-level overview of the FlatZinc integration with Se
 
 MiniZinc can export constraint satisfaction problems to FlatZinc format (*.fzn):
 - **Flattening Process**: https://docs.minizinc.dev/en/stable/flattening.html
-- **FlatZinc Specification**: https://docs.minizinc.dev/en/latest/fzn-spec.html
+- **FlatZinc Specification**: https://docs.minizinc.dev/en/stable/fzn-spec.html
   - BNF grammar is at the end of the spec document
 - **Latest MiniZinc Release**: 2.9.4
 
@@ -181,7 +181,7 @@ A: Tokenizer + recursive-descent for statements. Expression parser TBD. See [ZIN
 
 ## References
 
-- [FlatZinc 2.8.4 Specification](https://docs.minizinc.dev/en/latest/fzn-spec.html)
+- [FlatZinc Specification](https://docs.minizinc.dev/en/stable/fzn-spec.html)
 - [MiniZinc Documentation](https://docs.minizinc.dev/)
 - [MiniZinc Global Constraints](https://docs.minizinc.dev/en/stable/lib-globals.html)
 
