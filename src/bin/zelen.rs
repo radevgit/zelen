@@ -113,12 +113,13 @@ fn main() {
         if args.verbose {
             eprintln!("Finding up to {} solutions", n);
         }
-    }
-
-    // Note: intermediate flag affects optimization problems automatically
-    // when max_solutions > 1 or find_all_solutions is set
-    if args.intermediate && args.verbose {
-        eprintln!("Intermediate solutions will be shown for optimization problems");
+    } else if args.intermediate {
+        // For intermediate solutions in optimization, we need to collect multiple solutions
+        // Use a large number to get all intermediate solutions until timeout/optimal
+        solver.max_solutions(usize::MAX);
+        if args.verbose {
+            eprintln!("Intermediate solutions will be shown for optimization problems");
+        }
     }
 
     // Warn about unsupported options
