@@ -18,11 +18,109 @@ Zelen is a FlatZinc parser and integration library for the [Selen](https://githu
 
 ## Installation
 
+### As a Library
+
 Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 zelen = "0.1"
+```
+
+### As a Command-Line Solver
+
+Build and install the `zelen` binary:
+
+```bash
+cargo install zelen
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/radevgit/zelen
+cd zelen
+cargo build --release
+# Binary will be in target/release/zelen
+```
+
+#### Using with MiniZinc
+
+To use Zelen as a solver backend for MiniZinc:
+
+1. Build the zelen binary (see above)
+
+2. Copy the solver configuration file to MiniZinc's solver directory:
+
+```bash
+# Copy the template
+cp zelen.msc ~/.minizinc/solvers/
+
+# Edit ~/.minizinc/solvers/zelen.msc and replace the placeholder path
+# Change: "executable": "/full/path/to/zelen/target/release/zelen"
+# To your actual path, e.g.: "executable": "/home/user/zelen/target/release/zelen"
+```
+
+You can find your full path with:
+
+```bash
+cd /path/to/zelen && pwd
+# Then use that path in the .msc file as: /that/path/target/release/zelen
+```
+
+3. Verify MiniZinc can find the solver:
+
+```bash
+minizinc --solvers
+# Should list "Zelen" as an available solver
+```
+
+4. Solve MiniZinc models with Zelen:
+
+```bash
+# From MiniZinc source
+minizinc --solver zelen model.mzn
+
+# From FlatZinc directly
+minizinc --solver zelen model.fzn
+
+# Find all solutions
+minizinc --solver zelen -a model.mzn
+```
+
+#### Command-Line Options
+
+The `zelen` binary implements the FlatZinc standard command-line interface:
+
+```bash
+zelen [OPTIONS] <FILE>
+
+Options:
+  -a, --all-solutions      Find all solutions (satisfaction problems)
+  -n, --num-solutions <N>  Stop after N solutions
+  -i, --intermediate       Print intermediate solutions (optimization)
+  -f, --free-search        Free search (ignore search annotations, not yet supported)
+  -s, --statistics         Print statistics
+  -v, --verbose            Verbose output
+  -p, --parallel <N>       Use N parallel threads (not yet supported)
+  -r, --random-seed <N>    Random seed (not yet supported)
+  -t, --time <MS>          Time limit in milliseconds (0 = use Selen default of 60000ms)
+      --mem-limit <MB>     Memory limit in MB (0 = use Selen default of 2000MB)
+  -h, --help               Print help
+  -V, --version            Print version
+```
+
+Example usage:
+
+```bash
+# Find one solution
+zelen problem.fzn
+
+# Find all solutions with statistics
+zelen -a -s problem.fzn
+
+# Find up to 5 solutions with verbose output
+zelen -n 5 -v problem.fzn
 ```
 
 ## Quick Start

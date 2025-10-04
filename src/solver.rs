@@ -8,6 +8,7 @@ use crate::{tokenizer, parser, FlatZincResult, FlatZincError};
 use crate::mapper::map_to_model_with_context;
 use selen::prelude::*;
 use selen::variables::Val;
+use selen::utils::config::SolverConfig;
 use std::collections::HashMap;
 use std::fs;
 use std::time::{Duration, Instant};
@@ -30,6 +31,10 @@ pub struct SolverOptions {
     pub max_solutions: Option<usize>,
     /// Whether to include statistics in output
     pub include_statistics: bool,
+    /// Timeout in milliseconds (0 = no limit)
+    pub timeout_ms: u64,
+    /// Memory limit in megabytes (0 = no limit)
+    pub memory_limit_mb: usize,
 }
 
 impl Default for SolverOptions {
@@ -38,6 +43,8 @@ impl Default for SolverOptions {
             find_all_solutions: false,
             max_solutions: Some(1),
             include_statistics: true,
+            timeout_ms: 0,
+            memory_limit_mb: 0,
         }
     }
 }
@@ -59,8 +66,17 @@ impl FlatZincSolver {
 
     /// Create a new solver with custom options
     pub fn with_options(options: SolverOptions) -> Self {
+        // Create SolverConfig from options
+        let mut config = SolverConfig::default();
+        if options.timeout_ms > 0 {
+            config.timeout_ms = Some(options.timeout_ms);
+        }
+        if options.memory_limit_mb > 0 {
+            config.max_memory_mb = Some(options.memory_limit_mb as u64);
+        }
+        
         Self {
-            model: Some(Model::default()),
+            model: Some(Model::with_config(config)),
             context: None,
             solutions: Vec::new(),
             solve_time: None,
@@ -88,13 +104,35 @@ impl FlatZincSolver {
         self
     }
 
+    /// Set timeout in milliseconds (0 means no limit)
+    pub fn with_timeout(&mut self, timeout_ms: u64) -> &mut Self {
+        self.options.timeout_ms = timeout_ms;
+        self
+    }
+
+    /// Set memory limit in megabytes (0 means no limit)
+    pub fn with_memory_limit(&mut self, memory_limit_mb: usize) -> &mut Self {
+        self.options.memory_limit_mb = memory_limit_mb;
+        self
+    }
+
     /// Load a FlatZinc problem from a string
     pub fn load_str(&mut self, fzn: &str) -> FlatZincResult<()> {
         let tokens = tokenizer::tokenize(fzn)?;
         let ast = parser::parse(tokens)?;
         
-        let model = self.model.as_mut().expect("Model already consumed by solve()");
-        self.context = Some(map_to_model_with_context(ast, model)?);
+        // Recreate model with current configuration options
+        let mut config = SolverConfig::default();
+        if self.options.timeout_ms > 0 {
+            config.timeout_ms = Some(self.options.timeout_ms);
+        }
+        if self.options.memory_limit_mb > 0 {
+            config.max_memory_mb = Some(self.options.memory_limit_mb as u64);
+        }
+        let mut model = Model::with_config(config);
+        
+        self.context = Some(map_to_model_with_context(ast, &mut model)?);
+        self.model = Some(model);
         Ok(())
     }
 
@@ -119,6 +157,8 @@ impl FlatZincSolver {
         let start = Instant::now();
         let model = self.model.take().expect("Model already consumed by solve()");
         let context = self.context.as_ref().expect("No context available");
+        
+        // Note: Timeout and memory limit are already configured when the model was created
         
         self.solutions.clear();
         
