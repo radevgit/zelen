@@ -25,6 +25,8 @@ pub struct MappingContext<'a> {
     pub(super) param_int_arrays: HashMap<String, Vec<i32>>,
     /// Maps parameter array names to their constant boolean values
     pub(super) param_bool_arrays: HashMap<String, Vec<bool>>,
+    /// Maps parameter array names to their constant float values
+    pub(super) param_float_arrays: HashMap<String, Vec<f64>>,
     /// Inferred bounds for unbounded integer variables
     pub(super) unbounded_int_bounds: (i32, i32),
 }
@@ -37,6 +39,7 @@ impl<'a> MappingContext<'a> {
             array_map: HashMap::new(),
             param_int_arrays: HashMap::new(),
             param_bool_arrays: HashMap::new(),
+            param_float_arrays: HashMap::new(),
             unbounded_int_bounds: unbounded_bounds,
         }
     }
@@ -93,7 +96,10 @@ impl<'a> MappingContext<'a> {
                     // TODO: Handle sparse domains more efficiently
                     self.model.int(min as i32, max as i32)
                 }
-                Type::Float => self.model.float(f64::NEG_INFINITY, f64::INFINITY),
+                Type::Float => {
+                    // Selen handles unbounded floats internally via automatic bound inference
+                    self.model.float(f64::NEG_INFINITY, f64::INFINITY)
+                }
                 Type::FloatRange(min, max) => self.model.float(min, max),
                 _ => {
                     return Err(FlatZincError::UnsupportedFeature {
@@ -142,6 +148,27 @@ impl<'a> MappingContext<'a> {
                                 
                                 if let Ok(bool_values) = values {
                                     self.param_bool_arrays.insert(decl.name.clone(), bool_values);
+                                    return Ok(()); // Parameter arrays don't create variables
+                                }
+                            }
+                        }
+                        Type::Float | Type::FloatRange(..) => {
+                            // This is a parameter float array: array [1..n] of float: name = [values];
+                            if let Expr::ArrayLit(elements) = init {
+                                let values: Result<Vec<f64>, _> = elements.iter()
+                                    .map(|e| match e {
+                                        Expr::FloatLit(f) => Ok(*f),
+                                        Expr::IntLit(i) => Ok(*i as f64),
+                                        _ => Err(FlatZincError::MapError {
+                                            message: "Expected float/int literal in float array".to_string(),
+                                            line: Some(decl.location.line),
+                                            column: Some(decl.location.column),
+                                        }),
+                                    })
+                                    .collect();
+                                
+                                if let Ok(float_values) = values {
+                                    self.param_float_arrays.insert(decl.name.clone(), float_values);
                                     return Ok(()); // Parameter arrays don't create variables
                                 }
                             }
@@ -456,6 +483,31 @@ impl<'a> MappingContext<'a> {
             // Global cardinality
             "global_cardinality" => self.map_global_cardinality(constraint),
             "global_cardinality_low_up_closed" => self.map_global_cardinality_low_up_closed(constraint),
+            // Float constraints
+            "float_eq" => self.map_float_eq(constraint),
+            "float_ne" => self.map_float_ne(constraint),
+            "float_lt" => self.map_float_lt(constraint),
+            "float_le" => self.map_float_le(constraint),
+            "float_lin_eq" => self.map_float_lin_eq(constraint),
+            "float_lin_le" => self.map_float_lin_le(constraint),
+            "float_lin_ne" => self.map_float_lin_ne(constraint),
+            "float_plus" => self.map_float_plus(constraint),
+            "float_minus" => self.map_float_minus(constraint),
+            "float_times" => self.map_float_times(constraint),
+            "float_div" => self.map_float_div(constraint),
+            "float_abs" => self.map_float_abs(constraint),
+            "float_max" => self.map_float_max(constraint),
+            "float_min" => self.map_float_min(constraint),
+            // Float reified constraints
+            "float_eq_reif" => self.map_float_eq_reif(constraint),
+            "float_ne_reif" => self.map_float_ne_reif(constraint),
+            "float_lt_reif" => self.map_float_lt_reif(constraint),
+            "float_le_reif" => self.map_float_le_reif(constraint),
+            "float_gt_reif" => self.map_float_gt_reif(constraint),
+            "float_ge_reif" => self.map_float_ge_reif(constraint),
+            // Float/int conversions
+            "int2float" => self.map_int2float(constraint),
+            "float2int" => self.map_float2int(constraint),
             _ => {
                 Err(FlatZincError::UnsupportedFeature {
                     feature: format!("Constraint: {}", constraint.predicate),
@@ -511,6 +563,8 @@ fn infer_unbounded_int_bounds(ast: &FlatZincModel) -> (i32, i32) {
         (-DEFAULT_BOUND, DEFAULT_BOUND)
     }
 }
+
+
 
 // Re-export FlatZincContext from solver module
 pub use crate::solver::FlatZincContext;

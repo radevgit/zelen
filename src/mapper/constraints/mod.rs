@@ -13,3 +13,4 @@ pub(super) mod arithmetic;
 pub(super) mod counting;
 pub(super) mod set;
 pub(super) mod global_cardinality;
+pub(super) mod float;

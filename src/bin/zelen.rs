@@ -42,6 +42,10 @@ struct Args {
     /// Memory limit in MB (0 = use Selen default of 2000MB)
     #[arg(long = "mem-limit", value_name = "MB", default_value = "0")]
     mem_limit: usize,
+
+    /// Export the problem as a standalone Selen Rust program for debugging
+    #[arg(long = "export-selen", value_name = "FILE")]
+    export_selen: Option<PathBuf>,
 }
 
 fn main() {
@@ -83,6 +87,19 @@ fn main() {
 
     if args.verbose {
         eprintln!("FlatZinc model loaded successfully");
+    }
+
+    // Export to Selen Rust program if requested
+    if let Some(export_path) = args.export_selen {
+        if args.verbose {
+            eprintln!("Exporting Selen model to: {:?}", export_path);
+        }
+        if let Err(e) = solver.export_selen_program(export_path.to_str().unwrap()) {
+            eprintln!("Error exporting Selen program: {:?}", e);
+            process::exit(1);
+        }
+        eprintln!("Selen program exported successfully");
+        process::exit(0);
     }
 
     // Configure solution search

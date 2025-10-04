@@ -53,6 +53,7 @@ impl Default for SolverOptions {
 pub struct FlatZincSolver {
     model: Option<Model>,
     context: Option<FlatZincContext>,
+    ast: Option<FlatZincModel>,
     solutions: Vec<Solution>,
     solve_time: Option<Duration>,
     options: SolverOptions,
@@ -78,6 +79,7 @@ impl FlatZincSolver {
         Self {
             model: Some(Model::with_config(config)),
             context: None,
+            ast: None,
             solutions: Vec::new(),
             solve_time: None,
             options,
@@ -131,7 +133,8 @@ impl FlatZincSolver {
         }
         let mut model = Model::with_config(config);
         
-        self.context = Some(map_to_model_with_context(ast, &mut model)?);
+        self.context = Some(map_to_model_with_context(ast.clone(), &mut model)?);
+        self.ast = Some(ast);
         self.model = Some(model);
         Ok(())
     }
@@ -141,6 +144,20 @@ impl FlatZincSolver {
         let content = fs::read_to_string(path)
             .map_err(|e| FlatZincError::IoError(format!("Failed to read file: {}", e)))?;
         self.load_str(&content)
+    }
+
+    /// Export the loaded problem as a standalone Selen Rust program
+    /// 
+    /// This is useful for debugging - the generated program can be compiled
+    /// and run independently to test Selen behavior directly.
+    pub fn export_selen_program(&self, output_path: &str) -> FlatZincResult<()> {
+        let ast = self.ast.as_ref().ok_or_else(|| FlatZincError::MapError {
+            message: "No model loaded. Call load_file() or load_str() first.".to_string(),
+            line: None,
+            column: None,
+        })?;
+        
+        crate::exporter::export_selen_program(ast, output_path)
     }
 
     /// Solve the problem (satisfaction or optimization)

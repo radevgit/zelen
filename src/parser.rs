@@ -220,6 +220,23 @@ impl Parser {
                     });
                 }
             }
+            TokenType::FloatLiteral(min) => {
+                let min_val = *min;
+                self.advance();
+                self.expect(TokenType::DoubleDot)?;
+                if let TokenType::FloatLiteral(max) = self.peek() {
+                    let max_val = *max;
+                    self.advance();
+                    Type::FloatRange(min_val, max_val)
+                } else {
+                    let loc = self.location();
+                    return Err(FlatZincError::ParseError {
+                        message: "Expected float for range upper bound".to_string(),
+                        line: loc.line,
+                        column: loc.column,
+                    });
+                }
+            }
             TokenType::LeftBrace => {
                 self.advance();
                 let values = self.parse_int_set()?;

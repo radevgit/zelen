@@ -256,8 +256,15 @@ impl<'a> MappingContext<'a> {
                             var_ids.push(var_id);
                         }
                         Expr::IntLit(val) => {
-                            // Constant integer - create a fixed variable
+                            // Constant integer - for constraints that need VarId, create a fixed variable
+                            // Note: Some constraints can use constants directly via the View trait
                             let const_var = self.model.int(*val as i32, *val as i32);
+                            var_ids.push(const_var);
+                        }
+                        Expr::FloatLit(val) => {
+                            // Constant float - for constraints that need VarId, create a fixed variable
+                            // Note: Some constraints can use constants directly via float(val) from prelude
+                            let const_var = self.model.float(*val, *val);
                             var_ids.push(const_var);
                         }
                         Expr::BoolLit(b) => {
@@ -318,6 +325,52 @@ impl<'a> MappingContext<'a> {
             }
             _ => Err(FlatZincError::MapError {
                 message: "Expected array of variables".to_string(),
+                line: None,
+                column: None,
+            }),
+        }
+    }
+    
+    /// Extract a float value from an expression
+    pub(super) fn extract_float(&self, expr: &Expr) -> FlatZincResult<f64> {
+        match expr {
+            Expr::FloatLit(val) => Ok(*val),
+            Expr::IntLit(val) => Ok(*val as f64),
+            _ => Err(FlatZincError::MapError {
+                message: format!("Expected float literal, got: {:?}", expr),
+                line: None,
+                column: None,
+            }),
+        }
+    }
+    
+    /// Extract an array of float values from an expression
+    pub(super) fn extract_float_array(&self, expr: &Expr) -> FlatZincResult<Vec<f64>> {
+        match expr {
+            Expr::ArrayLit(elements) => {
+                let mut floats = Vec::new();
+                for elem in elements {
+                    floats.push(self.extract_float(elem)?);
+                }
+                Ok(floats)
+            }
+            Expr::Ident(name) => {
+                // Check if it's a parameter float array
+                if let Some(float_values) = self.param_float_arrays.get(name) {
+                    return Ok(float_values.clone());
+                }
+                // Check if it's a parameter int array and convert to floats
+                if let Some(int_values) = self.param_int_arrays.get(name) {
+                    return Ok(int_values.iter().map(|&v| v as f64).collect());
+                }
+                Err(FlatZincError::MapError {
+                    message: format!("Unknown float array: {}", name),
+                    line: None,
+                    column: None,
+                })
+            }
+            _ => Err(FlatZincError::MapError {
+                message: format!("Expected array of floats, got: {:?}", expr),
                 line: None,
                 column: None,
             }),
