@@ -121,6 +121,10 @@ impl<'a> MappingContext<'a> {
                 // Convert constant to fixed variable
                 Ok(self.model.int(*val as i32, *val as i32))
             }
+            Expr::FloatLit(val) => {
+                // Convert float constant to fixed variable
+                Ok(self.model.float(*val, *val))
+            }
             Expr::BoolLit(b) => {
                 // Convert boolean to 0/1 fixed variable
                 let val = if *b { 1 } else { 0 };
