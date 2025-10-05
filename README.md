@@ -47,7 +47,7 @@ cargo build --release
 # Binary will be in target/release/zelen
 ```
 
-#### Using with MiniZinc
+#### Installing Zelen as a MiniZinc solver
 
 To use Zelen as a solver backend for MiniZinc:
 
@@ -93,20 +93,6 @@ minizinc --solver zelen -m model.fzn -d data.dzn
 # Find all solutions
 minizinc --solver zelen -a model.mzn
 ```
-
-### Converting MiniZinc to FlatZinc
-
-To manually convert a MiniZinc model to FlatZinc format:
-
-```bash
-# Compile MiniZinc to FlatZinc (requires specifying a solver)
-minizinc --solver gecode --compile model.mzn -o model.fzn
-
-# Then solve with zelen directly
-./target/release/zelen model.fzn
-```
-
-Note: The `--solver gecode` flag is needed during compilation to properly flatten the model using Gecode's constraint library definitions.
 
 #### Command-Line Options
 

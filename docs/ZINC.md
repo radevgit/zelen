@@ -3,6 +3,8 @@
 - Flattening: https://docs.minizinc.dev/en/stable/flattening.html
 - FlatZinc Specification: https://docs.minizinc.dev/en/stable/fzn-spec.html
 
+Examples: https://www.hakank.org/minizinc/
+
 
 
 ## 4. Implementation Plan: Steps for FlatZinc Import

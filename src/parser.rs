@@ -246,9 +246,21 @@ impl Parser {
             TokenType::Set => {
                 self.advance();
                 self.expect(TokenType::Of)?;
-                // TODO: Handle set types more completely
-                self.expect(TokenType::Int)?;
-                Type::SetOfInt
+                // Parse the element type (int, range, etc.)
+                if self.match_token(&TokenType::Int) {
+                    Type::SetOfInt
+                } else if let TokenType::IntLiteral(_) = self.peek() {
+                    // Handle "set of 1..10" syntax
+                    let _ = self.parse_type()?; // Parse and discard the range type
+                    Type::SetOfInt
+                } else {
+                    let loc = self.location();
+                    return Err(FlatZincError::ParseError {
+                        message: format!("Expected Int or range after 'set of', found {:?}", self.peek()),
+                        line: loc.line,
+                        column: loc.column,
+                    });
+                }
             }
             TokenType::Array => {
                 self.advance();
@@ -442,7 +454,8 @@ impl Parser {
     fn parse_exprs(&mut self) -> FlatZincResult<Vec<Expr>> {
         let mut exprs = Vec::new();
         
-        if matches!(self.peek(), TokenType::RightParen) {
+        // Handle empty lists - check for closing tokens
+        if matches!(self.peek(), TokenType::RightParen | TokenType::RightBracket | TokenType::RightBrace) {
             return Ok(exprs);
         }
         

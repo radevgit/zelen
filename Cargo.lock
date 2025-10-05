@@ -136,7 +136,7 @@ dependencies = [
 
 [[package]]
 name = "selen"
-version = "0.9.1"
+version = "0.9.3"
 
 [[package]]
 name = "strsim"

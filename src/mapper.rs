@@ -201,6 +201,11 @@ impl<'a> MappingContext<'a> {
                                         let const_var = self.model.int(*val as i32, *val as i32);
                                         var_ids.push(const_var);
                                     }
+                                    Expr::FloatLit(val) => {
+                                        // Constant float - create a fixed variable
+                                        let const_var = self.model.float(*val, *val);
+                                        var_ids.push(const_var);
+                                    }
                                     Expr::BoolLit(b) => {
                                         // Constant boolean - create a fixed variable (0 or 1)
                                         let val = if *b { 1 } else { 0 };
@@ -429,8 +434,6 @@ impl<'a> MappingContext<'a> {
             "int_lin_eq" => self.map_int_lin_eq(constraint),
             "int_lin_le" => self.map_int_lin_le(constraint),
             "int_lin_ne" => self.map_int_lin_ne(constraint),
-            "int_lin_eq_reif" => self.map_int_lin_eq_reif(constraint),
-            "int_lin_le_reif" => self.map_int_lin_le_reif(constraint),
             "fzn_all_different_int" | "all_different_int" | "all_different" => self.map_all_different(constraint),
             "sort" => self.map_sort(constraint),
             "table_int" => self.map_table_int(constraint),
@@ -446,10 +449,22 @@ impl<'a> MappingContext<'a> {
             "int_le_reif" => self.map_int_le_reif(constraint),
             "int_gt_reif" => self.map_int_gt_reif(constraint),
             "int_ge_reif" => self.map_int_ge_reif(constraint),
+            "int_lin_eq_reif" => self.map_int_lin_eq_reif(constraint),
+            "int_lin_ne_reif" => self.map_int_lin_ne_reif(constraint),
+            "int_lin_le_reif" => self.map_int_lin_le_reif(constraint),
             "bool_clause" => self.map_bool_clause(constraint),
+            // Boolean linear constraints
+            "bool_lin_eq" => self.map_bool_lin_eq(constraint),
+            "bool_lin_le" => self.map_bool_lin_le(constraint),
+            "bool_lin_ne" => self.map_bool_lin_ne(constraint),
+            "bool_lin_eq_reif" => self.map_bool_lin_eq_reif(constraint),
+            "bool_lin_le_reif" => self.map_bool_lin_le_reif(constraint),
+            "bool_lin_ne_reif" => self.map_bool_lin_ne_reif(constraint),
             // Array aggregations
             "array_int_minimum" | "minimum_int" => self.map_array_int_minimum(constraint),
             "array_int_maximum" | "maximum_int" => self.map_array_int_maximum(constraint),
+            "array_float_minimum" | "minimum_float" => self.map_array_float_minimum(constraint),
+            "array_float_maximum" | "maximum_float" => self.map_array_float_maximum(constraint),
             "array_bool_and" => self.map_array_bool_and(constraint),
             "array_bool_or" => self.map_array_bool_or(constraint),
             // Bool-int conversion
@@ -462,6 +477,8 @@ impl<'a> MappingContext<'a> {
             "array_int_element" => self.map_array_int_element(constraint),
             "array_var_bool_element" => self.map_array_var_bool_element(constraint),
             "array_bool_element" => self.map_array_bool_element(constraint),
+            "array_var_float_element" => self.map_array_var_float_element(constraint),
+            "array_float_element" => self.map_array_float_element(constraint),
             // Arithmetic operations
             "int_abs" => self.map_int_abs(constraint),
             "int_plus" => self.map_int_plus(constraint),
@@ -505,6 +522,9 @@ impl<'a> MappingContext<'a> {
             "float_le_reif" => self.map_float_le_reif(constraint),
             "float_gt_reif" => self.map_float_gt_reif(constraint),
             "float_ge_reif" => self.map_float_ge_reif(constraint),
+            "float_lin_eq_reif" => self.map_float_lin_eq_reif(constraint),
+            "float_lin_ne_reif" => self.map_float_lin_ne_reif(constraint),
+            "float_lin_le_reif" => self.map_float_lin_le_reif(constraint),
             // Float/int conversions
             "int2float" => self.map_int2float(constraint),
             "float2int" => self.map_float2int(constraint),

@@ -7,6 +7,7 @@ pub(super) mod linear;
 pub(super) mod global;
 pub(super) mod reified;
 pub(super) mod boolean;
+pub(super) mod boolean_linear;
 pub(super) mod array;
 pub(super) mod element;
 pub(super) mod arithmetic;
