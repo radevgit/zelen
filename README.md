@@ -27,7 +27,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-zelen = "0.1"
+zelen = "0.2"
 ```
 
 ### As a Command-Line Solver
