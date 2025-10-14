@@ -40,6 +40,7 @@ use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::{VarIdExt, ModelExt};
 use selen::variables::VarId;
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     // ═════════════════════════════════════════════════════════════════════════
@@ -373,17 +374,17 @@ impl<'a> MappingContext<'a> {
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let y = self.get_var(&constraint.args[1])?;
-                self.model.int_eq_reif(x, y, b);
+                functions::eq_reif(self.model, x, y, b);
             }
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::IntLit(val)) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_eq_reif(x, const_var, b);
+                functions::eq_reif(self.model, x, const_var, b);
             }
             (Expr::IntLit(val), Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let y = self.get_var(&constraint.args[1])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_eq_reif(const_var, y, b);
+                functions::eq_reif(self.model, const_var, y, b);
             }
             _ => {
                 return Err(FlatZincError::MapError {
@@ -411,17 +412,17 @@ impl<'a> MappingContext<'a> {
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let y = self.get_var(&constraint.args[1])?;
-                self.model.int_ne_reif(x, y, b);
+                functions::ne_reif(self.model, x, y, b);
             }
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::IntLit(val)) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_ne_reif(x, const_var, b);
+                functions::ne_reif(self.model, x, const_var, b);
             }
             (Expr::IntLit(val), Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let y = self.get_var(&constraint.args[1])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_ne_reif(const_var, y, b);
+                functions::ne_reif(self.model, const_var, y, b);
             }
             _ => {
                 return Err(FlatZincError::MapError {
@@ -449,17 +450,17 @@ impl<'a> MappingContext<'a> {
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let y = self.get_var(&constraint.args[1])?;
-                self.model.int_lt_reif(x, y, b);
+                functions::lt_reif(self.model, x, y, b);
             }
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::IntLit(val)) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_lt_reif(x, const_var, b);
+                functions::lt_reif(self.model, x, const_var, b);
             }
             (Expr::IntLit(val), Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let y = self.get_var(&constraint.args[1])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_lt_reif(const_var, y, b);
+                functions::lt_reif(self.model, const_var, y, b);
             }
             _ => {
                 return Err(FlatZincError::MapError {
@@ -487,17 +488,17 @@ impl<'a> MappingContext<'a> {
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let y = self.get_var(&constraint.args[1])?;
-                self.model.int_le_reif(x, y, b);
+                functions::le_reif(self.model, x, y, b);
             }
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::IntLit(val)) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_le_reif(x, const_var, b);
+                functions::le_reif(self.model, x, const_var, b);
             }
             (Expr::IntLit(val), Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let y = self.get_var(&constraint.args[1])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_le_reif(const_var, y, b);
+                functions::le_reif(self.model, const_var, y, b);
             }
             _ => {
                 return Err(FlatZincError::MapError {
@@ -563,22 +564,22 @@ impl<'a> MappingContext<'a> {
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let y = self.get_var(&constraint.args[1])?;
-                self.model.int_ge_reif(x, y, b);
+                functions::ge_reif(self.model, x, y, b);
             }
             (Expr::Ident(_) | Expr::ArrayAccess { .. }, Expr::IntLit(val)) => {
                 let x = self.get_var(&constraint.args[0])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_ge_reif(x, const_var, b);
+                functions::ge_reif(self.model, x, const_var, b);
             }
             (Expr::IntLit(val), Expr::Ident(_) | Expr::ArrayAccess { .. }) => {
                 let y = self.get_var(&constraint.args[1])?;
                 let const_var = self.model.int(*val as i32, *val as i32);
-                self.model.int_ge_reif(const_var, y, b);
+                functions::ge_reif(self.model, const_var, y, b);
             }
             _ => {
                 return Err(FlatZincError::MapError {
                     message: "Unsupported argument types for int_ge_reif".to_string(),
-                    line: Some(constraint.location.line),
+                    line: Some(constraint.location.column),
                     column: Some(constraint.location.column),
                 });
             }

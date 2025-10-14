@@ -1,13 +1,11 @@
 //! Linear constraint mappers
 //!
-//! Maps FlatZinc linear constraints (int_lin_eq, int_lin_le, int_lin_ne)
-//! to Selen constraint model.
+//! Maps FlatZinc linear constraints (int_lin_eq, int_lin_le, int_lin_ne, float_lin_eq, float_lin_le, float_lin_ne)
+//! to Selen constraint model using the new generic lin_eq/lin_le/lin_ne API.
 
 use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
-use selen::runtime_api::{VarIdExt, ModelExt};
-use selen::variables::VarId;
 
 impl<'a> MappingContext<'a> {
     /// Map int_lin_eq: Σ(coeffs[i] * vars[i]) = constant
@@ -24,15 +22,8 @@ impl<'a> MappingContext<'a> {
         let var_ids = self.extract_var_array(&constraint.args[1])?;
         let constant = self.extract_int(&constraint.args[2])?;
         
-        // Create sum using Model's API
-        let scaled_vars: Vec<VarId> = coeffs
-            .iter()
-            .zip(var_ids.iter())
-            .map(|(&coeff, &var)| self.model.mul(var, selen::variables::Val::ValI(coeff)))
-            .collect();
-        
-        let sum_var = self.model.sum(&scaled_vars);
-        self.model.new(sum_var.eq(constant));
+        // Use the new generic lin_eq API
+        self.model.lin_eq(&coeffs, &var_ids, constant);
         Ok(())
     }
     
@@ -50,14 +41,8 @@ impl<'a> MappingContext<'a> {
         let var_ids = self.extract_var_array(&constraint.args[1])?;
         let constant = self.extract_int(&constraint.args[2])?;
         
-        let scaled_vars: Vec<VarId> = coeffs
-            .iter()
-            .zip(var_ids.iter())
-            .map(|(&coeff, &var)| self.model.mul(var, selen::variables::Val::ValI(coeff)))
-            .collect();
-        
-        let sum_var = self.model.sum(&scaled_vars);
-        self.model.new(sum_var.le(constant));
+        // Use the new generic lin_le API
+        self.model.lin_le(&coeffs, &var_ids, constant);
         Ok(())
     }
     
@@ -75,16 +60,8 @@ impl<'a> MappingContext<'a> {
         let var_ids = self.extract_var_array(&constraint.args[1])?;
         let constant = self.extract_int(&constraint.args[2])?;
         
-        let scaled_vars: Vec<VarId> = coeffs
-            .iter()
-            .zip(var_ids.iter())
-            .map(|(&coeff, &var)| self.model.mul(var, selen::variables::Val::ValI(coeff)))
-            .collect();
-        
-        let sum_var = self.model.sum(&scaled_vars);
-        
-        // Use runtime API to post not-equals constraint: sum ≠ constant
-        self.model.c(sum_var).ne(constant);
+        // Use the new generic lin_ne API
+        self.model.lin_ne(&coeffs, &var_ids, constant);
         Ok(())
     }
 }

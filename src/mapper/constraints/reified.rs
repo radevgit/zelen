@@ -7,6 +7,7 @@ use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::ModelExt;
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     /// Map int_eq_reif: b ⇔ (x = y)
@@ -22,7 +23,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_eq_reif(x, y, b);
+        // Use the new generic eq_reif API
+        functions::eq_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -38,7 +40,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_ne_reif(x, y, b);
+        // Use the new generic ne_reif API
+        functions::ne_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -54,7 +57,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_lt_reif(x, y, b);
+        // Use the new generic lt_reif API
+        functions::lt_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -70,7 +74,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_le_reif(x, y, b);
+        // Use the new generic le_reif API
+        functions::le_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -86,7 +91,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_gt_reif(x, y, b);
+        // Use the new generic gt_reif API
+        functions::gt_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -102,7 +108,8 @@ impl<'a> MappingContext<'a> {
         let x = self.get_var_or_const(&constraint.args[0])?;
         let y = self.get_var_or_const(&constraint.args[1])?;
         let b = self.get_var_or_const(&constraint.args[2])?;
-        self.model.int_ge_reif(x, y, b);
+        // Use the new generic ge_reif API
+        functions::ge_reif(self.model, x, y, b);
         Ok(())
     }
     
@@ -123,7 +130,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_int(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.int_lin_eq_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_eq_reif API
+        self.model.lin_eq_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
     
@@ -142,7 +150,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_int(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.int_lin_ne_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_ne_reif API
+        self.model.lin_ne_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
     
@@ -161,7 +170,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_int(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.int_lin_le_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_le_reif API
+        self.model.lin_le_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
 
@@ -180,7 +190,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_float(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.float_lin_eq_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_eq_reif API (works for both int and float)
+        self.model.lin_eq_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
     
@@ -199,7 +210,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_float(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.float_lin_ne_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_ne_reif API (works for both int and float)
+        self.model.lin_ne_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
     
@@ -218,7 +230,8 @@ impl<'a> MappingContext<'a> {
         let constant = self.extract_float(&constraint.args[2])?;
         let b = self.get_var_or_const(&constraint.args[3])?;
         
-        self.model.float_lin_le_reif(&coeffs, &vars, constant, b);
+        // Use the new generic lin_le_reif API (works for both int and float)
+        self.model.lin_le_reif(&coeffs, &vars, constant, b);
         Ok(())
     }
 }

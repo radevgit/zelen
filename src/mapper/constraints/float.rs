@@ -7,6 +7,7 @@ use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::{VarIdExt, ModelExt};
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     /// Map float_eq constraint: x = y
@@ -102,8 +103,8 @@ impl<'a> MappingContext<'a> {
             });
         }
         
-        // Use native Selen float_lin_eq constraint
-        self.model.float_lin_eq(&coeffs, &vars, constant);
+        // Use the new generic lin_eq API (works for both int and float)
+        self.model.lin_eq(&coeffs, &vars, constant);
         
         Ok(())
     }
@@ -131,8 +132,8 @@ impl<'a> MappingContext<'a> {
             });
         }
         
-        // Use native Selen float_lin_le constraint
-        self.model.float_lin_le(&coeffs, &vars, constant);
+        // Use the new generic lin_le API (works for both int and float)
+        self.model.lin_le(&coeffs, &vars, constant);
         
         Ok(())
     }
@@ -160,8 +161,8 @@ impl<'a> MappingContext<'a> {
             });
         }
         
-        // Use native Selen float_lin_ne constraint
-        self.model.float_lin_ne(&coeffs, &vars, constant);
+        // Use the new generic lin_ne API (works for both int and float)
+        self.model.lin_ne(&coeffs, &vars, constant);
         
         Ok(())
     }
@@ -336,7 +337,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_eq_reif(x, y, r);
+        functions::eq_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -354,7 +355,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_ne_reif(x, y, r);
+        functions::ne_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -372,7 +373,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_lt_reif(x, y, r);
+        functions::lt_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -390,7 +391,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_le_reif(x, y, r);
+        functions::le_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -408,7 +409,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_gt_reif(x, y, r);
+        functions::gt_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -426,7 +427,7 @@ impl<'a> MappingContext<'a> {
         let y = self.get_var_or_const(&constraint.args[1])?;
         let r = self.get_var_or_const(&constraint.args[2])?;
         
-        self.model.float_ge_reif(x, y, r);
+        functions::ge_reif(self.model, x, y, r);
         Ok(())
     }
     

@@ -6,6 +6,7 @@ use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::{VarIdExt, ModelExt};
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     /// Map set_in_reif: b ⇔ (value ∈ set)
@@ -44,12 +45,12 @@ impl<'a> MappingContext<'a> {
                 // Create: b1 ⇔ (value >= min)
                 let min_var = self.model.int(min, min);
                 let b1 = self.model.bool();
-                self.model.int_ge_reif(value, min_var, b1);
+                functions::ge_reif(self.model, value, min_var, b1);
                 
                 // Create: b2 ⇔ (value <= max)
                 let max_var = self.model.int(max, max);
                 let b2 = self.model.bool();
-                self.model.int_le_reif(value, max_var, b2);
+                functions::le_reif(self.model, value, max_var, b2);
                 
                 // Create: b ⇔ (b1 AND b2)
                 let and_result = self.model.bool_and(&[b1, b2]);
@@ -73,7 +74,7 @@ impl<'a> MappingContext<'a> {
                     let elem_val = self.extract_int(elem)?;
                     let elem_var = self.model.int(elem_val, elem_val);
                     let bi = self.model.bool();
-                    self.model.int_eq_reif(value, elem_var, bi);
+                    functions::eq_reif(self.model, value, elem_var, bi);
                     membership_vars.push(bi);
                 }
                 
@@ -137,7 +138,7 @@ impl<'a> MappingContext<'a> {
                     let elem_val = self.extract_int(elem)?;
                     let elem_var = self.model.int(elem_val, elem_val);
                     let bi = self.model.bool();
-                    self.model.int_eq_reif(value, elem_var, bi);
+                    functions::eq_reif(self.model, value, elem_var, bi);
                     membership_vars.push(bi);
                 }
                 

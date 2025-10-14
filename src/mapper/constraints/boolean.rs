@@ -7,6 +7,7 @@ use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::{VarIdExt, ModelExt};
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     /// Map bool_clause: (∨ pos[i]) ∨ (∨ ¬neg[i])
@@ -148,8 +149,8 @@ impl<'a> MappingContext<'a> {
         let r = self.get_var_or_const(&constraint.args[2])?;
         
         // For booleans (0/1): r ⇔ (x = y)
-        // Since booleans are represented as 0/1 integers in Selen, we can use int_eq_reif
-        self.model.int_eq_reif(x, y, r);
+        // Since booleans are represented as 0/1 integers in Selen, we can use eq_reif
+        functions::eq_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -188,7 +189,7 @@ impl<'a> MappingContext<'a> {
         let r = self.get_var_or_const(&constraint.args[2])?;
         
         // For booleans (0/1): r ⇔ (x ≤ y)
-        self.model.int_le_reif(x, y, r);
+        functions::le_reif(self.model, x, y, r);
         Ok(())
     }
     
@@ -230,7 +231,7 @@ impl<'a> MappingContext<'a> {
         // z = x XOR y
         // For booleans: x XOR y = (x + y) mod 2 = x + y - 2*(x*y)
         // Or equivalently: z ⇔ (x ≠ y)
-        self.model.int_ne_reif(x, y, z);
+        functions::ne_reif(self.model, x, y, z);
         Ok(())
     }
 }
