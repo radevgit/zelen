@@ -10,10 +10,13 @@ Zelen is a FlatZinc parser and integration library for the [Selen](https://githu
 
 - ✅ **Complete FlatZinc parser** - Parses FlatZinc models into an AST
 - ✅ **Seamless Selen integration** - Maps FlatZinc constraints to Selen's constraint model
+- ✅ **Integer & Float constraints** - Full support for both integer and floating-point constraint programming
 - ✅ **Extensive constraint support** - Arithmetic, comparison, linear, boolean, global constraints (alldiff, table, etc.)
-- ✅ **Array handling** - Full support for arrays and array indexing
+- ✅ **Array handling** - Full support for arrays and array indexing (including float literals)
 - ✅ **Reification** - Support for reified constraints
+- ✅ **Type conversions** - int2float, float2int (floor/ceil/round)
 - ✅ **Optimization** - Handles both satisfaction and optimization problems (minimize/maximize)
+- ✅ **Export feature** - Generate standalone Selen test programs for debugging
 - ✅ **High compatibility** - Successfully parses 96%+ of real-world FlatZinc files
 
 ## Installation
@@ -44,7 +47,7 @@ cargo build --release
 # Binary will be in target/release/zelen
 ```
 
-#### Using with MiniZinc
+#### Installing Zelen as a MiniZinc solver
 
 To use Zelen as a solver backend for MiniZinc:
 
@@ -84,23 +87,12 @@ minizinc --solver zelen model.mzn
 # From FlatZinc directly
 minizinc --solver zelen model.fzn
 
+# With data file
+minizinc --solver zelen -m model.fzn -d data.dzn
+
 # Find all solutions
 minizinc --solver zelen -a model.mzn
 ```
-
-### Converting MiniZinc to FlatZinc
-
-To manually convert a MiniZinc model to FlatZinc format:
-
-```bash
-# Compile MiniZinc to FlatZinc (requires specifying a solver)
-minizinc --solver gecode --compile model.mzn -o model.fzn
-
-# Then solve with zelen directly
-./target/release/zelen model.fzn
-```
-
-Note: The `--solver gecode` flag is needed during compilation to properly flatten the model using Gecode's constraint library definitions.
 
 #### Command-Line Options
 

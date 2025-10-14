@@ -1,6 +1,6 @@
 [package]
 name = "zelen"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 description = "Selen CSP solver parser for FlatZinc"
 rust-version = "1.88"
@@ -26,7 +26,7 @@ name = "zelen"
 path = "src/bin/zelen.rs"
 
 [dependencies]
-selen = "0.9"
+selen = "0.12"
 clap = { version = "4.5", features = ["derive"] }
 
 [dev-dependencies]

@@ -42,6 +42,10 @@ struct Args {
     /// Memory limit in MB (0 = use Selen default of 2000MB)
     #[arg(long = "mem-limit", value_name = "MB", default_value = "0")]
     mem_limit: usize,
+
+    /// Export the problem as a standalone Selen Rust program for debugging
+    #[arg(long = "export-selen", value_name = "FILE")]
+    export_selen: Option<PathBuf>,
 }
 
 fn main() {
@@ -85,6 +89,19 @@ fn main() {
         eprintln!("FlatZinc model loaded successfully");
     }
 
+    // Export to Selen Rust program if requested
+    if let Some(export_path) = args.export_selen {
+        if args.verbose {
+            eprintln!("Exporting Selen model to: {:?}", export_path);
+        }
+        if let Err(e) = solver.export_selen_program(export_path.to_str().unwrap()) {
+            eprintln!("Error exporting Selen program: {:?}", e);
+            process::exit(1);
+        }
+        eprintln!("Selen program exported successfully");
+        process::exit(0);
+    }
+
     // Configure solution search
     if args.all_solutions {
         solver.find_all_solutions();
@@ -96,12 +113,13 @@ fn main() {
         if args.verbose {
             eprintln!("Finding up to {} solutions", n);
         }
-    }
-
-    // Note: intermediate flag affects optimization problems automatically
-    // when max_solutions > 1 or find_all_solutions is set
-    if args.intermediate && args.verbose {
-        eprintln!("Intermediate solutions will be shown for optimization problems");
+    } else if args.intermediate {
+        // For intermediate solutions in optimization, we need to collect multiple solutions
+        // Use a large number to get all intermediate solutions until timeout/optimal
+        solver.max_solutions(usize::MAX);
+        if args.verbose {
+            eprintln!("Intermediate solutions will be shown for optimization problems");
+        }
     }
 
     // Warn about unsupported options

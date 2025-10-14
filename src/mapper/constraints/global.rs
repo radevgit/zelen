@@ -6,6 +6,7 @@ use crate::ast::*;
 use crate::error::{FlatZincError, FlatZincResult};
 use crate::mapper::MappingContext;
 use selen::runtime_api::{ModelExt, VarIdExt};
+use selen::constraints::functions;
 
 impl<'a> MappingContext<'a> {
     /// Map all_different constraint
@@ -82,7 +83,7 @@ impl<'a> MappingContext<'a> {
                 let mut equality_vars = Vec::new();
                 for &xj in &x {
                     let bi = self.model.bool();
-                    self.model.int_eq_reif(yi, xj, bi);
+                    functions::eq_reif(self.model, yi, xj, bi);
                     equality_vars.push(bi);
                 }
                 let or_result = self.model.bool_or(&equality_vars);
@@ -94,7 +95,7 @@ impl<'a> MappingContext<'a> {
                 let mut equality_vars = Vec::new();
                 for &yi in &y {
                     let bi = self.model.bool();
-                    self.model.int_eq_reif(xj, yi, bi);
+                    functions::eq_reif(self.model, xj, yi, bi);
                     equality_vars.push(bi);
                 }
                 let or_result = self.model.bool_or(&equality_vars);
@@ -163,7 +164,7 @@ impl<'a> MappingContext<'a> {
                 // Create: b_i ↔ (x[i] = table_value)
                 let b = self.model.bool();
                 let const_var = self.model.int(table_value, table_value);
-                self.model.int_eq_reif(var, const_var, b);
+                functions::eq_reif(self.model, var, const_var, b);
                 position_matches.push(b);
             }
             
@@ -231,7 +232,7 @@ impl<'a> MappingContext<'a> {
                 // Create: b_i ↔ (x[i] = table_value)
                 let b = self.model.bool();
                 let const_var = self.model.int(table_value as i32, table_value as i32);
-                self.model.int_eq_reif(var, const_var, b);
+                functions::eq_reif(self.model, var, const_var, b);
                 position_matches.push(b);
             }
             
@@ -296,13 +297,13 @@ impl<'a> MappingContext<'a> {
             // All previous positions must be equal
             for j in 0..i {
                 let eq_b = self.model.bool();
-                self.model.int_eq_reif(x[j], y[j], eq_b);
+                functions::eq_reif(self.model, x[j], y[j], eq_b);
                 conditions.push(eq_b);
             }
             
             // At position i, x[i] < y[i]
             let lt_b = self.model.bool();
-            self.model.int_lt_reif(x[i], y[i], lt_b);
+            functions::lt_reif(self.model, x[i], y[i], lt_b);
             conditions.push(lt_b);
             
             // All conditions must hold
@@ -367,13 +368,13 @@ impl<'a> MappingContext<'a> {
             // All previous positions must be equal
             for j in 0..i {
                 let eq_b = self.model.bool();
-                self.model.int_eq_reif(x[j], y[j], eq_b);
+                functions::eq_reif(self.model, x[j], y[j], eq_b);
                 conditions.push(eq_b);
             }
             
             // At position i, x[i] < y[i]
             let lt_b = self.model.bool();
-            self.model.int_lt_reif(x[i], y[i], lt_b);
+            functions::lt_reif(self.model, x[i], y[i], lt_b);
             conditions.push(lt_b);
             
             // All conditions must hold
@@ -385,7 +386,7 @@ impl<'a> MappingContext<'a> {
         let mut all_equal_conditions = Vec::new();
         for i in 0..n {
             let eq_b = self.model.bool();
-            self.model.int_eq_reif(x[i], y[i], eq_b);
+            functions::eq_reif(self.model, x[i], y[i], eq_b);
             all_equal_conditions.push(eq_b);
         }
         let all_equal = self.model.bool_and(&all_equal_conditions);
@@ -456,7 +457,7 @@ impl<'a> MappingContext<'a> {
             for &xi in &x {
                 let eq_b = self.model.bool();
                 let const_var = self.model.int(value, value);
-                self.model.int_eq_reif(xi, const_var, eq_b);
+                functions::eq_reif(self.model, xi, const_var, eq_b);
                 any_equal.push(eq_b);
             }
             
@@ -639,12 +640,12 @@ impl<'a> MappingContext<'a> {
             
             // b1 ↔ (s[i] ≤ t)
             let b1 = self.model.bool();
-            self.model.int_le_reif(starts[i], t_const, b1);
+            functions::le_reif(self.model, starts[i], t_const, b1);
             
             // b2 ↔ (s[i] + d[i] > t)  which is  (s[i] > t - d[i])
             let b2 = self.model.bool();
             let t_minus_d = self.model.int(t - end_time_i + 1, t - end_time_i + 1);
-            self.model.int_ge_reif(starts[i], t_minus_d, b2);
+            functions::ge_reif(self.model, starts[i], t_minus_d, b2);
             
             // active_i = b1 AND b2
             let active_i = self.model.bool_and(&[b1, b2]);
@@ -683,11 +684,11 @@ impl<'a> MappingContext<'a> {
             let end_time_i = durations[i];
             
             let b1 = self.model.bool();
-            self.model.int_le_reif(starts[i], t_const, b1);
+            functions::le_reif(self.model, starts[i], t_const, b1);
             
             let b2 = self.model.bool();
             let t_minus_d = self.model.int(t - end_time_i + 1, t - end_time_i + 1);
-            self.model.int_ge_reif(starts[i], t_minus_d, b2);
+            functions::ge_reif(self.model, starts[i], t_minus_d, b2);
             
             let active_i = self.model.bool_and(&[b1, b2]);
             let usage_i = self.model.mul(active_i, selen::variables::Val::ValI(resources[i]));

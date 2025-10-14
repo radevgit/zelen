@@ -158,4 +158,39 @@ impl<'a> MappingContext<'a> {
         self.model.elem(&array, index_0based, value);
         Ok(())
     }
+    
+    /// Map array_float_element: array[index] = value (with variable float array)
+    /// FlatZinc signature: array_float_element(index, array, value)
+    /// Note: FlatZinc uses 1-based indexing, Selen uses 0-based
+    pub(in crate::mapper) fn map_array_float_element(&mut self, constraint: &Constraint) -> FlatZincResult<()> {
+        if constraint.args.len() != 3 {
+            return Err(FlatZincError::MapError {
+                message: "array_float_element requires 3 arguments (index, array, value)".to_string(),
+                line: Some(constraint.location.line),
+                column: Some(constraint.location.column),
+            });
+        }
+        
+        // Get index variable (1-based in FlatZinc)
+        let index_1based = self.get_var_or_const(&constraint.args[0])?;
+        
+        // Convert to 0-based index for Selen
+        let index_0based = self.model.sub(index_1based, selen::variables::Val::ValI(1));
+        
+        // Get array of float variables
+        let array = self.extract_var_array(&constraint.args[1])?;
+        
+        // Get value variable
+        let value = self.get_var_or_const(&constraint.args[2])?;
+        
+        // Apply float element constraint
+        self.model.array_float_element(index_0based, &array, value);
+        Ok(())
+    }
+    
+    /// Map array_var_float_element: array[index] = value (with variable float array)
+    /// Alias for array_float_element
+    pub(in crate::mapper) fn map_array_var_float_element(&mut self, constraint: &Constraint) -> FlatZincResult<()> {
+        self.map_array_float_element(constraint)
+    }
 }

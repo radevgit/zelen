@@ -53,6 +53,8 @@ pub mod mapper;
 pub mod output;
 pub mod solver;
 pub mod integration;
+#[doc(hidden)]
+pub mod exporter;
 
 pub use error::{FlatZincError, FlatZincResult};
 pub use solver::{FlatZincSolver, FlatZincContext, SolverOptions};

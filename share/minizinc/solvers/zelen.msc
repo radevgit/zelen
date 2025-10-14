@@ -2,13 +2,14 @@
   "id": "org.selen.zelen",
   "name": "Zelen",
   "description": "FlatZinc solver based on Selen CSP solver",
-  "version": "0.1.1",
-  "mznlib": "",
+  "version": "0.2.0",
+  "mznlib": "/full/path/to/zelen/mznlib",
   "executable": "/full/path/to/zelen/target/release/zelen",
-  "tags": ["cp", "int"],
+  "tags": ["cp", "int", "float", "bool"],
   "stdFlags": ["-a", "-f", "-n", "-p", "-r", "-s", "-t", "-v"],
   "extraFlags": [
-    ["--mem-limit", "Memory limit in MB (default: 2000)", "int", ""]
+    ["--mem-limit", "Memory limit in MB (default: 2000)", "int", ""],
+    ["--export-selen", "Export Selen test program to file", "string", ""]
   ],
   "supportsMzn": false,
   "supportsFzn": true,

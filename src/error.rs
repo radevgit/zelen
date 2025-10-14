@@ -69,3 +69,9 @@ impl fmt::Display for FlatZincError {
 }
 
 impl std::error::Error for FlatZincError {}
+
+impl From<std::io::Error> for FlatZincError {
+    fn from(err: std::io::Error) -> Self {
+        FlatZincError::IoError(format!("{}", err))
+    }
+}

@@ -52,7 +52,7 @@ impl<'a> MappingContext<'a> {
         for (&value, &count_var) in values.iter().zip(counts.iter()) {
             // Use Selen's count constraint: count(vars, value, count_var)
             // This constrains: count_var = |{j : vars[j] = value}|
-            self.model.count(&vars, value, count_var);
+            self.model.count(&vars, selen::variables::Val::ValI(value), count_var);
         }
         
         Ok(())
@@ -115,7 +115,7 @@ impl<'a> MappingContext<'a> {
             // Use Selen's count constraint: count(vars, value, count_var)
             // This constrains: count_var = |{j : vars[j] = value}|
             // The count_var's domain already enforces low_bound <= count_var <= up_bound
-            self.model.count(&vars, value, count_var);
+            self.model.count(&vars, selen::variables::Val::ValI(value), count_var);
         }
         
         Ok(())

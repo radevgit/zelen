@@ -101,6 +101,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             find_all_solutions: false,
             max_solutions: Some(1),
             include_statistics: true,
+            timeout_ms: 0,           // No timeout
+            memory_limit_mb: 0,      // No memory limit
         };
 
         let mut solver = FlatZincSolver::with_options(options);
