@@ -1,106 +1,85 @@
-//! # Zelen - FlatZinc Frontend for Selen
-//! 
-//! Zelen provides FlatZinc parsing and integration with the Selen constraint solver.
-//! 
-//! ## Quick Start
-//! 
-//! ```rust
-//! use zelen::prelude::*;
-//! 
-//! // Define a simple FlatZinc problem
-//! let fzn = r#"
-//!     var 1..10: x;
-//!     var 1..10: y;
-//!     constraint int_eq(x, 5);
-//!     constraint int_plus(x, y, 12);
-//!     solve satisfy;
-//! "#;
-//! 
-//! // Create solver and solve
-//! let mut solver = FlatZincSolver::new();
-//! solver.load_str(fzn).unwrap();
-//! 
-//! if solver.solve().is_ok() {
-//!     // Get FlatZinc-formatted output
-//!     let output = solver.to_flatzinc();
-//!     assert!(output.contains("x = 5"));
-//!     assert!(output.contains("y = 7"));
-//! }
-//! ```
-//! 
-//! ## Main API
-//! 
-//! The primary way to use Zelen is through the [`FlatZincSolver`] which provides
-//! automatic FlatZinc parsing and spec-compliant output formatting.
-//! 
-//! For more control, you can use the lower-level [`FlatZincModel`] trait or work
-//! with individual modules directly.
-//! 
-//! See the [`prelude`] module for commonly used types and traits.
+//! Zelen - MiniZinc to Selen Compiler
+//!
+//! This crate implements a compiler that translates a subset of MiniZinc
+//! directly to Selen code, bypassing FlatZinc.
 
-// Internal implementation modules - hidden from docs by default
-#[doc(hidden)]
 pub mod ast;
 pub mod error;
-#[doc(hidden)]
-pub mod tokenizer;
-#[doc(hidden)]
+pub mod lexer;
 pub mod parser;
-#[doc(hidden)]
-pub mod mapper;
 
-// Public API modules
-pub mod output;
-pub mod solver;
-pub mod integration;
-#[doc(hidden)]
-pub mod exporter;
+pub use ast::*;
+pub use error::{Error, Result};
+pub use lexer::Lexer;
+pub use parser::Parser;
 
-pub use error::{FlatZincError, FlatZincResult};
-pub use solver::{FlatZincSolver, FlatZincContext, SolverOptions};
-pub use integration::FlatZincModel;
-
-// Re-export selen for convenience, but hide its docs since users should refer to selen's own docs
-#[doc(no_inline)]
-pub use selen;
-
-/// Prelude module for convenient imports.
-///
-/// This module re-exports the most commonly used types and traits.
-/// 
-/// # Example
-/// 
-/// ```rust
-/// use zelen::prelude::*;
-/// 
-/// let mut solver = FlatZincSolver::new();
-/// // ... use solver
-/// ```
-pub mod prelude {
-    //! Commonly used types and traits for working with FlatZinc.
-    
-    pub use crate::error::{FlatZincError, FlatZincResult};
-    pub use crate::integration::FlatZincModel;
-    pub use crate::output::{OutputFormatter, SearchType, SolveStatistics};
-    pub use crate::solver::{FlatZincContext, FlatZincSolver, SolverOptions};
-    
-    // Re-export Selen's prelude, but don't inline the docs
-    #[doc(no_inline)]
-    pub use selen::prelude::*;
+/// Parse a MiniZinc model from source text
+pub fn parse(source: &str) -> Result<Model> {
+    let lexer = Lexer::new(source);
+    let mut parser = Parser::new(lexer).with_source(source.to_string());
+    parser.parse_model()
 }
 
-/// Parse FlatZinc tokens into AST and map to an existing Model.
-///
-/// This is an internal function used by Model::from_flatzinc_* methods.
-pub(crate) fn parse_and_map(content: &str, model: &mut selen::prelude::Model) -> FlatZincResult<()> {
-    // Step 1: Tokenize
-    let tokens = tokenizer::tokenize(content)?;
-    
-    // Step 2: Parse into AST
-    let ast = parser::parse(tokens)?;
-    
-    // Step 3: Map AST to the provided Model
-    mapper::map_to_model_mut(ast, model)?;
-    
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_simple_model() {
+        let source = r#"
+            int: n = 5;
+            var 1..n: x;
+            constraint x > 2;
+            solve satisfy;
+        "#;
+        
+        let result = parse(source);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        
+        let model = result.unwrap();
+        assert_eq!(model.items.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_nqueens() {
+        let source = r#"
+            int: n = 4;
+            array[1..n] of var 1..n: queens;
+            constraint alldifferent(queens);
+            solve satisfy;
+        "#;
+        
+        let result = parse(source);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+        
+        let model = result.unwrap();
+        assert_eq!(model.items.len(), 4);
+    }
+
+    #[test]
+    fn test_parse_with_expressions() {
+        let source = r#"
+            int: n = 10;
+            array[1..n] of var int: x;
+            constraint sum(x) == 100;
+            constraint forall(i in 1..n)(x[i] >= 0);
+            solve minimize sum(i in 1..n)(x[i] * x[i]);
+        "#;
+        
+        let result = parse(source);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_error_reporting() {
+        let source = "int n = 5"; // Missing colon
+        
+        let result = parse(source);
+        assert!(result.is_err());
+        
+        if let Err(e) = result {
+            let error_msg = format!("{}", e);
+            assert!(error_msg.contains("line 1"));
+        }
+    }
 }

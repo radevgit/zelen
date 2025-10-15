@@ -1,577 +1,732 @@
-//! FlatZinc Parser
+//! Parser for MiniZinc Core Subset
 //!
-//! Recursive-descent parser that converts tokens into an AST.
+//! Implements a recursive descent parser that builds an AST from tokens.
 
 use crate::ast::*;
-use crate::error::{FlatZincError, FlatZincResult};
-use crate::tokenizer::{Token, TokenType, Location};
+use crate::error::{Error, Result};
+use crate::lexer::{Lexer, Token, TokenKind};
 
-/// Parser state
 pub struct Parser {
-    tokens: Vec<Token>,
-    position: usize,
+    lexer: Lexer,
+    current_token: Token,
+    source: String,
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, position: 0 }
-    }
-    
-    fn current(&self) -> &Token {
-        self.tokens.get(self.position).unwrap_or(&self.tokens[self.tokens.len() - 1])
-    }
-    
-    fn peek(&self) -> &TokenType {
-        &self.current().token_type
-    }
-    
-    fn location(&self) -> Location {
-        self.current().location
-    }
-    
-    fn advance(&mut self) -> &Token {
-        let token = &self.tokens[self.position];
-        if !matches!(token.token_type, TokenType::Eof) {
-            self.position += 1;
+    pub fn new(mut lexer: Lexer) -> Self {
+        let current_token = lexer.next_token().unwrap_or_else(|_| Token {
+            kind: TokenKind::Eof,
+            span: Span::dummy(),
+        });
+        
+        Self {
+            lexer,
+            current_token,
+            source: String::new(),
         }
-        token
     }
     
-    fn expect(&mut self, expected: TokenType) -> FlatZincResult<()> {
-        if std::mem::discriminant(self.peek()) == std::mem::discriminant(&expected) {
-            self.advance();
-            Ok(())
+    pub fn with_source(mut self, source: String) -> Self {
+        self.source = source;
+        self
+    }
+    
+    /// Add source context to an error
+    fn add_source_to_error(&self, error: Error) -> Error {
+        if !self.source.is_empty() {
+            error.with_source(self.source.clone())
         } else {
-            let loc = self.location();
-            Err(FlatZincError::ParseError {
-                message: format!("Expected {:?}, found {:?}", expected, self.peek()),
-                line: loc.line,
-                column: loc.column,
-            })
+            error
         }
     }
     
-    fn match_token(&mut self, token_type: &TokenType) -> bool {
-        if std::mem::discriminant(self.peek()) == std::mem::discriminant(token_type) {
-            self.advance();
-            true
-        } else {
-            false
+    /// Parse a complete MiniZinc model
+    pub fn parse_model(&mut self) -> Result<Model> {
+        let mut items = Vec::new();
+        
+        while self.current_token.kind != TokenKind::Eof {
+            items.push(self.parse_item()?);
+        }
+        
+        Ok(Model { items })
+    }
+    
+    /// Parse a single item
+    fn parse_item(&mut self) -> Result<Item> {
+        match &self.current_token.kind {
+            TokenKind::Constraint => self.parse_constraint(),
+            TokenKind::Solve => self.parse_solve(),
+            TokenKind::Output => self.parse_output(),
+            _ => self.parse_var_decl(),
         }
     }
     
-    /// Parse the entire FlatZinc model
-    pub fn parse_model(&mut self) -> FlatZincResult<FlatZincModel> {
-        let mut model = FlatZincModel::new();
+    /// Parse variable declaration: `int: n = 5;` or `array[1..n] of var int: x;`
+    fn parse_var_decl(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        let type_inst = self.parse_type_inst()?;
         
-        while !matches!(self.peek(), TokenType::Eof) {
-            match self.peek() {
-                TokenType::Predicate => {
-                    model.predicates.push(self.parse_predicate()?);
-                }
-                TokenType::Var | TokenType::Array | TokenType::Bool | TokenType::Int | TokenType::Float => {
-                    model.var_decls.push(self.parse_var_decl()?);
-                }
-                TokenType::Constraint => {
-                    model.constraints.push(self.parse_constraint()?);
-                }
-                TokenType::Solve => {
-                    model.solve_goal = self.parse_solve()?;
-                }
-                _ => {
-                    let loc = self.location();
-                    return Err(FlatZincError::ParseError {
-                        message: format!("Unexpected token: {:?}", self.peek()),
-                        line: loc.line,
-                        column: loc.column,
-                    });
-                }
-            }
-        }
+        self.expect(TokenKind::Colon)?;
         
-        Ok(model)
-    }
-    
-    fn parse_predicate(&mut self) -> FlatZincResult<PredicateDecl> {
-        let loc = self.location();
-        self.expect(TokenType::Predicate)?;
+        let name = self.expect_ident()?;
         
-        let name = if let TokenType::Identifier(s) = self.peek() {
-            let n = s.clone();
-            self.advance();
-            n
-        } else {
-            return Err(FlatZincError::ParseError {
-                message: "Expected predicate name".to_string(),
-                line: loc.line,
-                column: loc.column,
-            });
-        };
-        
-        self.expect(TokenType::LeftParen)?;
-        let params = self.parse_pred_params()?;
-        self.expect(TokenType::RightParen)?;
-        self.expect(TokenType::Semicolon)?;
-        
-        Ok(PredicateDecl { name, params, location: loc })
-    }
-    
-    fn parse_pred_params(&mut self) -> FlatZincResult<Vec<PredParam>> {
-        let mut params = Vec::new();
-        
-        if matches!(self.peek(), TokenType::RightParen) {
-            return Ok(params);
-        }
-        
-        loop {
-            let param_type = self.parse_type()?;
-            self.expect(TokenType::Colon)?;
-            
-            let name = if let TokenType::Identifier(s) = self.peek() {
-                let n = s.clone();
-                self.advance();
-                n
-            } else {
-                let loc = self.location();
-                return Err(FlatZincError::ParseError {
-                    message: "Expected parameter name".to_string(),
-                    line: loc.line,
-                    column: loc.column,
-                });
-            };
-            
-            params.push(PredParam { param_type, name });
-            
-            if !self.match_token(&TokenType::Comma) {
-                break;
-            }
-        }
-        
-        Ok(params)
-    }
-    
-    fn parse_var_decl(&mut self) -> FlatZincResult<VarDecl> {
-        let loc = self.location();
-        let var_type = self.parse_type()?;
-        self.expect(TokenType::Colon)?;
-        
-        let name = if let TokenType::Identifier(s) = self.peek() {
-            let n = s.clone();
-            self.advance();
-            n
-        } else {
-            return Err(FlatZincError::ParseError {
-                message: "Expected variable name".to_string(),
-                line: loc.line,
-                column: loc.column,
-            });
-        };
-        
-        let annotations = self.parse_annotations()?;
-        
-        let init_value = if self.match_token(&TokenType::Equals) {
+        let expr = if self.current_token.kind == TokenKind::Eq {
+            self.advance()?;
             Some(self.parse_expr()?)
         } else {
             None
         };
         
-        self.expect(TokenType::Semicolon)?;
+        self.expect(TokenKind::Semicolon)?;
         
-        Ok(VarDecl {
-            var_type,
+        let end = self.current_token.span.end;
+        
+        Ok(Item::VarDecl(VarDecl {
+            type_inst,
             name,
-            annotations,
-            init_value,
-            location: loc,
-        })
+            expr,
+            span: Span::new(start, end),
+        }))
     }
     
-    fn parse_type(&mut self) -> FlatZincResult<Type> {
-        // Handle 'var' prefix
-        let is_var = self.match_token(&TokenType::Var);
+    /// Parse type-inst: `var int`, `array[1..n] of var 1..10`, etc.
+    fn parse_type_inst(&mut self) -> Result<TypeInst> {
+        // Check for array type
+        if self.current_token.kind == TokenKind::Array {
+            return self.parse_array_type_inst();
+        }
         
-        let base_type = match self.peek() {
-            TokenType::Bool => {
-                self.advance();
-                Type::Bool
+        // Parse var/par
+        let is_var = match &self.current_token.kind {
+            TokenKind::Var => {
+                self.advance()?;
+                true
             }
-            TokenType::Int => {
-                self.advance();
-                Type::Int
+            TokenKind::Par => {
+                self.advance()?;
+                false
             }
-            TokenType::Float => {
-                self.advance();
-                Type::Float
-            }
-            TokenType::IntLiteral(min) => {
-                let min_val = *min;
-                self.advance();
-                self.expect(TokenType::DoubleDot)?;
-                if let TokenType::IntLiteral(max) = self.peek() {
-                    let max_val = *max;
-                    self.advance();
-                    Type::IntRange(min_val, max_val)
-                } else {
-                    let loc = self.location();
-                    return Err(FlatZincError::ParseError {
-                        message: "Expected integer for range upper bound".to_string(),
-                        line: loc.line,
-                        column: loc.column,
-                    });
-                }
-            }
-            TokenType::FloatLiteral(min) => {
-                let min_val = *min;
-                self.advance();
-                self.expect(TokenType::DoubleDot)?;
-                if let TokenType::FloatLiteral(max) = self.peek() {
-                    let max_val = *max;
-                    self.advance();
-                    Type::FloatRange(min_val, max_val)
-                } else {
-                    let loc = self.location();
-                    return Err(FlatZincError::ParseError {
-                        message: "Expected float for range upper bound".to_string(),
-                        line: loc.line,
-                        column: loc.column,
-                    });
-                }
-            }
-            TokenType::LeftBrace => {
-                self.advance();
-                let values = self.parse_int_set()?;
-                self.expect(TokenType::RightBrace)?;
-                Type::IntSet(values)
-            }
-            TokenType::Set => {
-                self.advance();
-                self.expect(TokenType::Of)?;
-                // Parse the element type (int, range, etc.)
-                if self.match_token(&TokenType::Int) {
-                    Type::SetOfInt
-                } else if let TokenType::IntLiteral(_) = self.peek() {
-                    // Handle "set of 1..10" syntax
-                    let _ = self.parse_type()?; // Parse and discard the range type
-                    Type::SetOfInt
-                } else {
-                    let loc = self.location();
-                    return Err(FlatZincError::ParseError {
-                        message: format!("Expected Int or range after 'set of', found {:?}", self.peek()),
-                        line: loc.line,
-                        column: loc.column,
-                    });
-                }
-            }
-            TokenType::Array => {
-                self.advance();
-                self.expect(TokenType::LeftBracket)?;
-                let index_sets = self.parse_index_sets()?;
-                self.expect(TokenType::RightBracket)?;
-                self.expect(TokenType::Of)?;
-                let element_type = Box::new(self.parse_type()?);
-                Type::Array { index_sets, element_type }
-            }
-            _ => {
-                let loc = self.location();
-                return Err(FlatZincError::ParseError {
-                    message: format!("Expected type, found {:?}", self.peek()),
-                    line: loc.line,
-                    column: loc.column,
-                });
-            }
+            _ => false, // Default to par
         };
         
-        if is_var {
-            Ok(Type::Var(Box::new(base_type)))
-        } else {
-            Ok(base_type)
-        }
-    }
-    
-    fn parse_int_set(&mut self) -> FlatZincResult<Vec<i64>> {
-        let mut values = Vec::new();
-        
-        if matches!(self.peek(), TokenType::RightBrace) {
-            return Ok(values);
-        }
-        
-        loop {
-            if let TokenType::IntLiteral(val) = self.peek() {
-                values.push(*val);
-                self.advance();
-            } else {
-                let loc = self.location();
-                return Err(FlatZincError::ParseError {
-                    message: "Expected integer in set".to_string(),
-                    line: loc.line,
-                    column: loc.column,
-                });
+        // Parse base type or domain
+        match &self.current_token.kind {
+            TokenKind::Bool => {
+                self.advance()?;
+                Ok(TypeInst::Basic { is_var, base_type: BaseType::Bool })
             }
-            
-            if !self.match_token(&TokenType::Comma) {
-                break;
+            TokenKind::Int => {
+                self.advance()?;
+                // Check if followed by range or set (constrained type)
+                // This is a lookahead - we'll handle it in the next iteration if needed
+                Ok(TypeInst::Basic { is_var, base_type: BaseType::Int })
             }
-        }
-        
-        Ok(values)
-    }
-    
-    fn parse_index_sets(&mut self) -> FlatZincResult<Vec<IndexSet>> {
-        let mut index_sets = Vec::new();
-        
-        loop {
-            // Handle 'int' as index set type (for predicate declarations)
-            if let TokenType::Int = self.peek() {
-                self.advance();
-                index_sets.push(IndexSet::Range(1, 1000000)); // Arbitrary large range for 'int'
+            TokenKind::Float => {
+                self.advance()?;
+                Ok(TypeInst::Basic { is_var, base_type: BaseType::Float })
             }
-            // Handle numeric range like 1..8 OR single integer like [1] (meaning 1..1)
-            else if let TokenType::IntLiteral(min) = self.peek() {
-                let min_val = *min;
-                self.advance();
+            TokenKind::IntLit(_) | TokenKind::LBrace => {
+                // Constrained type: 1..10 or {1,3,5}
+                let domain = self.parse_range_or_set_expr()?;
                 
-                // Check if there's a range operator (..)
-                if self.match_token(&TokenType::DoubleDot) {
-                    // It's a range: min..max
-                    if let TokenType::IntLiteral(max) = self.peek() {
-                        let max_val = *max;
-                        self.advance();
-                        index_sets.push(IndexSet::Range(min_val, max_val));
-                    } else {
-                        let loc = self.location();
-                        return Err(FlatZincError::ParseError {
-                            message: "Expected integer for index range upper bound".to_string(),
-                            line: loc.line,
-                            column: loc.column,
-                        });
-                    }
-                } else {
-                    // It's a single integer: treat as range 1..min_val
-                    // This handles array[1] or array[N] syntax
-                    index_sets.push(IndexSet::Range(1, min_val));
-                }
-            } else {
-                break;
-            }
-            
-            if !self.match_token(&TokenType::Comma) {
-                break;
-            }
-        }
-        
-        Ok(index_sets)
-    }
-    
-    fn parse_constraint(&mut self) -> FlatZincResult<Constraint> {
-        let loc = self.location();
-        self.expect(TokenType::Constraint)?;
-        
-        let predicate = if let TokenType::Identifier(s) = self.peek() {
-            let n = s.clone();
-            self.advance();
-            n
-        } else {
-            return Err(FlatZincError::ParseError {
-                message: "Expected constraint predicate name".to_string(),
-                line: loc.line,
-                column: loc.column,
-            });
-        };
-        
-        self.expect(TokenType::LeftParen)?;
-        let args = self.parse_exprs()?;
-        self.expect(TokenType::RightParen)?;
-        
-        let annotations = self.parse_annotations()?;
-        self.expect(TokenType::Semicolon)?;
-        
-        Ok(Constraint {
-            predicate,
-            args,
-            annotations,
-            location: loc,
-        })
-    }
-    
-    fn parse_solve(&mut self) -> FlatZincResult<SolveGoal> {
-        self.expect(TokenType::Solve)?;
-        
-        // Parse annotations that come before the goal (e.g., solve :: int_search(...) satisfy)
-        let annotations = self.parse_annotations()?;
-        
-        let goal = match self.peek() {
-            TokenType::Satisfy => {
-                self.advance();
-                SolveGoal::Satisfy { annotations }
-            }
-            TokenType::Minimize => {
-                self.advance();
-                let objective = self.parse_expr()?;
-                SolveGoal::Minimize { objective, annotations }
-            }
-            TokenType::Maximize => {
-                self.advance();
-                let objective = self.parse_expr()?;
-                SolveGoal::Maximize { objective, annotations }
-            }
-            _ => {
-                let loc = self.location();
-                return Err(FlatZincError::ParseError {
-                    message: "Expected satisfy, minimize, or maximize".to_string(),
-                    line: loc.line,
-                    column: loc.column,
-                });
-            }
-        };
-        
-        self.expect(TokenType::Semicolon)?;
-        Ok(goal)
-    }
-    
-    fn parse_annotations(&mut self) -> FlatZincResult<Vec<Annotation>> {
-        let mut annotations = Vec::new();
-        
-        while self.match_token(&TokenType::DoubleColon) {
-            if let TokenType::Identifier(name) = self.peek() {
-                let ann_name = name.clone();
-                self.advance();
-                
-                let args = if self.match_token(&TokenType::LeftParen) {
-                    let exprs = self.parse_exprs()?;
-                    self.expect(TokenType::RightParen)?;
-                    exprs
-                } else {
-                    Vec::new()
+                // Infer base type from domain
+                let base_type = match &domain.kind {
+                    ExprKind::Range(_, _) => BaseType::Int,
+                    ExprKind::SetLit(_) => BaseType::Int,
+                    _ => BaseType::Int,
                 };
                 
-                annotations.push(Annotation { name: ann_name, args });
-            }
-        }
-        
-        Ok(annotations)
-    }
-    
-    fn parse_exprs(&mut self) -> FlatZincResult<Vec<Expr>> {
-        let mut exprs = Vec::new();
-        
-        // Handle empty lists - check for closing tokens
-        if matches!(self.peek(), TokenType::RightParen | TokenType::RightBracket | TokenType::RightBrace) {
-            return Ok(exprs);
-        }
-        
-        loop {
-            exprs.push(self.parse_expr()?);
-            if !self.match_token(&TokenType::Comma) {
-                break;
-            }
-        }
-        
-        Ok(exprs)
-    }
-    
-    fn parse_expr(&mut self) -> FlatZincResult<Expr> {
-        match self.peek() {
-            TokenType::True => {
-                self.advance();
-                Ok(Expr::BoolLit(true))
-            }
-            TokenType::False => {
-                self.advance();
-                Ok(Expr::BoolLit(false))
-            }
-            TokenType::IntLiteral(val) => {
-                let v = *val;
-                self.advance();
-                
-                // Check for range
-                if self.match_token(&TokenType::DoubleDot) {
-                    if let TokenType::IntLiteral(max) = self.peek() {
-                        let max_val = *max;
-                        self.advance();
-                        Ok(Expr::Range(Box::new(Expr::IntLit(v)), Box::new(Expr::IntLit(max_val))))
-                    } else {
-                        Ok(Expr::IntLit(v))
-                    }
-                } else {
-                    Ok(Expr::IntLit(v))
-                }
-            }
-            TokenType::FloatLiteral(val) => {
-                let v = *val;
-                self.advance();
-                Ok(Expr::FloatLit(v))
-            }
-            TokenType::StringLiteral(s) => {
-                let string = s.clone();
-                self.advance();
-                Ok(Expr::StringLit(string))
-            }
-            TokenType::Identifier(name) => {
-                let id = name.clone();
-                self.advance();
-                
-                // Check for array access
-                if self.match_token(&TokenType::LeftBracket) {
-                    let index = self.parse_expr()?;
-                    self.expect(TokenType::RightBracket)?;
-                    Ok(Expr::ArrayAccess {
-                        array: Box::new(Expr::Ident(id)),
-                        index: Box::new(index),
-                    })
-                } else {
-                    Ok(Expr::Ident(id))
-                }
-            }
-            TokenType::LeftBracket => {
-                self.advance();
-                let elements = self.parse_exprs()?;
-                self.expect(TokenType::RightBracket)?;
-                Ok(Expr::ArrayLit(elements))
-            }
-            TokenType::LeftBrace => {
-                self.advance();
-                let elements = self.parse_exprs()?;
-                self.expect(TokenType::RightBrace)?;
-                Ok(Expr::SetLit(elements))
-            }
-            _ => {
-                let loc = self.location();
-                Err(FlatZincError::ParseError {
-                    message: format!("Unexpected token in expression: {:?}", self.peek()),
-                    line: loc.line,
-                    column: loc.column,
+                Ok(TypeInst::Constrained {
+                    is_var,
+                    base_type,
+                    domain,
                 })
             }
+            _ => {
+                Err(self.add_source_to_error(Error::unexpected_token(
+                    "type (bool, int, float, or constrained type)",
+                    &format!("{:?}", self.current_token.kind),
+                    self.current_token.span,
+                )))
+            }
         }
     }
-}
-
-/// Parse a token stream into an AST
-pub fn parse(tokens: Vec<Token>) -> FlatZincResult<FlatZincModel> {
-    let mut parser = Parser::new(tokens);
-    parser.parse_model()
+    
+    /// Parse a range or set expression for type constraints
+    fn parse_range_or_set_expr(&mut self) -> Result<Expr> {
+        if self.current_token.kind == TokenKind::LBrace {
+            self.parse_set_literal()
+        } else {
+            // Parse as expression (will handle ranges)
+            self.parse_expr()
+        }
+    }
+    
+    /// Parse array type: `array[1..n] of var int`
+    fn parse_array_type_inst(&mut self) -> Result<TypeInst> {
+        self.expect(TokenKind::Array)?;
+        self.expect(TokenKind::LBracket)?;
+        
+        let index_set = self.parse_expr()?;
+        
+        self.expect(TokenKind::RBracket)?;
+        self.expect(TokenKind::Of)?;
+        
+        let element_type = Box::new(self.parse_type_inst()?);
+        
+        Ok(TypeInst::Array {
+            index_set,
+            element_type,
+        })
+    }
+    
+    /// Parse constraint: `constraint x < y;`
+    fn parse_constraint(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::Constraint)?;
+        
+        let expr = self.parse_expr()?;
+        
+        self.expect(TokenKind::Semicolon)?;
+        
+        let end = self.current_token.span.end;
+        
+        Ok(Item::Constraint(Constraint {
+            expr,
+            span: Span::new(start, end),
+        }))
+    }
+    
+    /// Parse solve item: `solve satisfy;` or `solve minimize cost;`
+    fn parse_solve(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::Solve)?;
+        
+        let solve = match &self.current_token.kind {
+            TokenKind::Satisfy => {
+                self.advance()?;
+                Solve::Satisfy {
+                    span: Span::new(start, self.current_token.span.end),
+                }
+            }
+            TokenKind::Minimize => {
+                self.advance()?;
+                let expr = self.parse_expr()?;
+                Solve::Minimize {
+                    expr,
+                    span: Span::new(start, self.current_token.span.end),
+                }
+            }
+            TokenKind::Maximize => {
+                self.advance()?;
+                let expr = self.parse_expr()?;
+                Solve::Maximize {
+                    expr,
+                    span: Span::new(start, self.current_token.span.end),
+                }
+            }
+            _ => {
+                return Err(self.add_source_to_error(Error::unexpected_token(
+                    "satisfy, minimize, or maximize",
+                    &format!("{:?}", self.current_token.kind),
+                    self.current_token.span,
+                )));
+            }
+        };
+        
+        self.expect(TokenKind::Semicolon)?;
+        
+        Ok(Item::Solve(solve))
+    }
+    
+    /// Parse output item: `output ["x = ", show(x)];`
+    fn parse_output(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::Output)?;
+        
+        let expr = self.parse_expr()?;
+        
+        self.expect(TokenKind::Semicolon)?;
+        
+        let end = self.current_token.span.end;
+        
+        Ok(Item::Output(Output {
+            expr,
+            span: Span::new(start, end),
+        }))
+    }
+    
+    /// Parse expression with precedence climbing
+    fn parse_expr(&mut self) -> Result<Expr> {
+        self.parse_expr_bp(0)
+    }
+    
+    /// Parse expression with binding power (precedence)
+    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        
+        // Parse left-hand side (prefix operators or primary)
+        let mut lhs = self.parse_prefix_expr()?;
+        
+        // Parse binary operators
+        loop {
+            let op = match self.current_token.kind {
+                TokenKind::Plus => BinOp::Add,
+                TokenKind::Minus => BinOp::Sub,
+                TokenKind::Star => BinOp::Mul,
+                TokenKind::Slash => BinOp::FDiv,
+                TokenKind::Div => BinOp::Div,
+                TokenKind::Mod => BinOp::Mod,
+                TokenKind::Lt => BinOp::Lt,
+                TokenKind::Le => BinOp::Le,
+                TokenKind::Gt => BinOp::Gt,
+                TokenKind::Ge => BinOp::Ge,
+                TokenKind::Eq => BinOp::Eq,
+                TokenKind::Ne => BinOp::Ne,
+                TokenKind::And => BinOp::And,
+                TokenKind::Or => BinOp::Or,
+                TokenKind::Impl => BinOp::Impl,
+                TokenKind::Iff => BinOp::Iff,
+                TokenKind::Xor => BinOp::Xor,
+                TokenKind::In => BinOp::In,
+                TokenKind::DotDot => BinOp::Range,
+                _ => break,
+            };
+            
+            let (l_bp, r_bp) = self.binding_power(op);
+            
+            if l_bp < min_bp {
+                break;
+            }
+            
+            self.advance()?;
+            let rhs = self.parse_expr_bp(r_bp)?;
+            
+            let end = rhs.span.end;
+            lhs = Expr {
+                kind: ExprKind::BinOp {
+                    op,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
+                },
+                span: Span::new(start, end),
+            };
+        }
+        
+        Ok(lhs)
+    }
+    
+    /// Get binding power (precedence) for binary operators
+    fn binding_power(&self, op: BinOp) -> (u8, u8) {
+        match op {
+            BinOp::Iff => (2, 1),
+            BinOp::Impl => (4, 3),
+            BinOp::Or => (6, 5),
+            BinOp::Xor => (6, 5),
+            BinOp::And => (8, 7),
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => (10, 9),
+            BinOp::In => (10, 9),
+            BinOp::Range => (12, 11),
+            BinOp::Add | BinOp::Sub => (14, 13),
+            BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::FDiv => (16, 15),
+        }
+    }
+    
+    /// Parse prefix expression (unary operators)
+    fn parse_prefix_expr(&mut self) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        
+        match &self.current_token.kind {
+            TokenKind::Minus => {
+                self.advance()?;
+                let expr = self.parse_prefix_expr()?;
+                let end = expr.span.end;
+                Ok(Expr {
+                    kind: ExprKind::UnOp {
+                        op: UnOp::Neg,
+                        expr: Box::new(expr),
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            TokenKind::Not => {
+                self.advance()?;
+                let expr = self.parse_prefix_expr()?;
+                let end = expr.span.end;
+                Ok(Expr {
+                    kind: ExprKind::UnOp {
+                        op: UnOp::Not,
+                        expr: Box::new(expr),
+                    },
+                    span: Span::new(start, end),
+                })
+            }
+            _ => self.parse_postfix_expr(),
+        }
+    }
+    
+    /// Parse postfix expression (array access, function calls)
+    fn parse_postfix_expr(&mut self) -> Result<Expr> {
+        let mut expr = self.parse_primary_expr()?;
+        
+        loop {
+            match &self.current_token.kind {
+                TokenKind::LBracket => {
+                    // Array access
+                    self.advance()?;
+                    let index = self.parse_expr()?;
+                    self.expect(TokenKind::RBracket)?;
+                    
+                    let end = self.current_token.span.end;
+                    expr = Expr {
+                        span: Span::new(expr.span.start, end),
+                        kind: ExprKind::ArrayAccess {
+                            array: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                    };
+                }
+                TokenKind::LParen => {
+                    // Function call (only if expr is an identifier)
+                    if let ExprKind::Ident(name) = &expr.kind {
+                        let name = name.clone();
+                        self.advance()?;
+                        
+                        let mut args = Vec::new();
+                        if self.current_token.kind != TokenKind::RParen {
+                            loop {
+                                // Check for generator call: forall(i in 1..n)(expr)
+                                if self.is_generator_start() {
+                                    let generators = self.parse_generators()?;
+                                    self.expect(TokenKind::RParen)?;
+                                    self.expect(TokenKind::LParen)?;
+                                    let body = self.parse_expr()?;
+                                    self.expect(TokenKind::RParen)?;
+                                    
+                                    let end = self.current_token.span.end;
+                                    return Ok(Expr {
+                                        span: Span::new(expr.span.start, end),
+                                        kind: ExprKind::GenCall {
+                                            name,
+                                            generators,
+                                            body: Box::new(body),
+                                        },
+                                    });
+                                }
+                                
+                                args.push(self.parse_expr()?);
+                                if self.current_token.kind != TokenKind::Comma {
+                                    break;
+                                }
+                                self.advance()?;
+                            }
+                        }
+                        
+                        self.expect(TokenKind::RParen)?;
+                        
+                        let end = self.current_token.span.end;
+                        expr = Expr {
+                            span: Span::new(expr.span.start, end),
+                            kind: ExprKind::Call { name, args },
+                        };
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        
+        Ok(expr)
+    }
+    
+    /// Parse primary expression (literals, identifiers, parentheses, arrays, etc.)
+    fn parse_primary_expr(&mut self) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        
+        let kind = match self.current_token.kind.clone() {
+            TokenKind::BoolLit(b) => {
+                self.advance()?;
+                ExprKind::BoolLit(b)
+            }
+            TokenKind::IntLit(i) => {
+                self.advance()?;
+                ExprKind::IntLit(i)
+            }
+            TokenKind::FloatLit(f) => {
+                self.advance()?;
+                ExprKind::FloatLit(f)
+            }
+            TokenKind::StringLit(s) => {
+                self.advance()?;
+                ExprKind::StringLit(s)
+            }
+            TokenKind::Ident(name) => {
+                self.advance()?;
+                ExprKind::Ident(name)
+            }
+            TokenKind::LParen => {
+                self.advance()?;
+                let expr = self.parse_expr()?;
+                self.expect(TokenKind::RParen)?;
+                return Ok(expr);
+            }
+            TokenKind::LBracket => {
+                return self.parse_array_literal_or_comp();
+            }
+            TokenKind::LBrace => {
+                return self.parse_set_literal();
+            }
+            _ => {
+                return Err(self.add_source_to_error(Error::unexpected_token(
+                    "expression",
+                    &format!("{:?}", self.current_token.kind),
+                    self.current_token.span,
+                )));
+            }
+        };
+        
+        let end = self.current_token.span.end;
+        Ok(Expr {
+            kind,
+            span: Span::new(start, end),
+        })
+    }
+    
+    /// Parse array literal or comprehension: `[1,2,3]` or `[i*2 | i in 1..n]`
+    fn parse_array_literal_or_comp(&mut self) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::LBracket)?;
+        
+        if self.current_token.kind == TokenKind::RBracket {
+            // Empty array
+            self.advance()?;
+            return Ok(Expr {
+                kind: ExprKind::ArrayLit(Vec::new()),
+                span: Span::new(start, self.current_token.span.end),
+            });
+        }
+        
+        let first_expr = self.parse_expr()?;
+        
+        // Check for comprehension
+        if self.current_token.kind == TokenKind::Pipe {
+            self.advance()?;
+            let generators = self.parse_generators()?;
+            self.expect(TokenKind::RBracket)?;
+            
+            let end = self.current_token.span.end;
+            return Ok(Expr {
+                kind: ExprKind::ArrayComp {
+                    expr: Box::new(first_expr),
+                    generators,
+                },
+                span: Span::new(start, end),
+            });
+        }
+        
+        // Regular array literal
+        let mut elements = vec![first_expr];
+        while self.current_token.kind == TokenKind::Comma {
+            self.advance()?;
+            if self.current_token.kind == TokenKind::RBracket {
+                break;
+            }
+            elements.push(self.parse_expr()?);
+        }
+        
+        self.expect(TokenKind::RBracket)?;
+        
+        let end = self.current_token.span.end;
+        Ok(Expr {
+            kind: ExprKind::ArrayLit(elements),
+            span: Span::new(start, end),
+        })
+    }
+    
+    /// Parse set literal: `{1, 2, 3}`
+    fn parse_set_literal(&mut self) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::LBrace)?;
+        
+        let mut elements = Vec::new();
+        if self.current_token.kind != TokenKind::RBrace {
+            loop {
+                elements.push(self.parse_expr()?);
+                if self.current_token.kind != TokenKind::Comma {
+                    break;
+                }
+                self.advance()?;
+            }
+        }
+        
+        self.expect(TokenKind::RBrace)?;
+        
+        let end = self.current_token.span.end;
+        Ok(Expr {
+            kind: ExprKind::SetLit(elements),
+            span: Span::new(start, end),
+        })
+    }
+    
+    /// Check if current position starts a generator
+    /// We need to peek ahead to see if there's an 'in' keyword
+    fn is_generator_start(&mut self) -> bool {
+        if !matches!(self.current_token.kind, TokenKind::Ident(_)) {
+            return false;
+        }
+        
+        // Try to peek ahead to find 'in' keyword
+        // Simple heuristic: if we see ident followed by 'in', it's a generator
+        let mut peek_lexer = self.lexer.clone();
+        let mut depth = 0;
+        
+        loop {
+            match peek_lexer.next_token() {
+                Ok(token) => match token.kind {
+                    TokenKind::In if depth == 0 => return true,
+                    TokenKind::LParen => depth += 1,
+                    TokenKind::RParen if depth > 0 => depth -= 1,
+                    TokenKind::RParen | TokenKind::Comma if depth == 0 => return false,
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                Err(_) => return false,
+            }
+        }
+    }
+    
+    /// Parse generators: `i in 1..n where i > 0, j in 1..m`
+    fn parse_generators(&mut self) -> Result<Vec<Generator>> {
+        let mut generators = Vec::new();
+        
+        loop {
+            let mut names = vec![self.expect_ident()?];
+            
+            while self.current_token.kind == TokenKind::Comma {
+                self.advance()?;
+                if self.current_token.kind == TokenKind::In {
+                    break;
+                }
+                names.push(self.expect_ident()?);
+            }
+            
+            self.expect(TokenKind::In)?;
+            let expr = self.parse_expr()?;
+            
+            let where_clause = if self.current_token.kind == TokenKind::Where {
+                self.advance()?;
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
+            
+            generators.push(Generator {
+                names,
+                expr,
+                where_clause,
+            });
+            
+            if self.current_token.kind != TokenKind::Comma {
+                break;
+            }
+            self.advance()?;
+        }
+        
+        Ok(generators)
+    }
+    
+    // Helper methods
+    
+    fn advance(&mut self) -> Result<()> {
+        self.current_token = self.lexer.next_token().map_err(|e| {
+            self.add_source_to_error(e)
+        })?;
+        Ok(())
+    }
+    
+    fn expect(&mut self, expected: TokenKind) -> Result<()> {
+        if std::mem::discriminant(&self.current_token.kind) == std::mem::discriminant(&expected) {
+            self.advance()?;
+            Ok(())
+        } else {
+            Err(self.add_source_to_error(Error::unexpected_token(
+                &format!("{:?}", expected),
+                &format!("{:?}", self.current_token.kind),
+                self.current_token.span,
+            )))
+        }
+    }
+    
+    fn expect_ident(&mut self) -> Result<String> {
+        if let TokenKind::Ident(name) = &self.current_token.kind {
+            let name = name.clone();
+            self.advance()?;
+            Ok(name)
+        } else {
+            Err(self.add_source_to_error(Error::unexpected_token(
+                "identifier",
+                &format!("{:?}", self.current_token.kind),
+                self.current_token.span,
+            )))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tokenizer::tokenize;
-    
-    #[test]
-    fn test_parse_simple_var() {
-        let input = "var 1..10: x;\nsolve satisfy;";
-        let tokens = tokenize(input).unwrap();
-        let ast = parse(tokens).unwrap();
-        assert_eq!(ast.var_decls.len(), 1);
-        assert_eq!(ast.var_decls[0].name, "x");
+
+    fn parse(source: &str) -> Result<Model> {
+        let lexer = Lexer::new(source);
+        let mut parser = Parser::new(lexer).with_source(source.to_string());
+        parser.parse_model()
     }
-    
+
     #[test]
-    fn test_parse_constraint() {
-        let input = "var 1..10: x;\nconstraint int_eq(x, 5);\nsolve satisfy;";
-        let tokens = tokenize(input).unwrap();
-        let ast = parse(tokens).unwrap();
-        assert_eq!(ast.constraints.len(), 1);
-        assert_eq!(ast.constraints[0].predicate, "int_eq");
+    fn test_simple_var_decl() {
+        let model = parse("int: n = 5;").unwrap();
+        assert_eq!(model.items.len(), 1);
+    }
+
+    #[test]
+    fn test_array_decl() {
+        let model = parse("array[1..n] of var int: x;").unwrap();
+        assert_eq!(model.items.len(), 1);
+    }
+
+    #[test]
+    fn test_constraint() {
+        let model = parse("constraint x < y;").unwrap();
+        assert_eq!(model.items.len(), 1);
+    }
+
+    #[test]
+    fn test_solve_satisfy() {
+        let model = parse("solve satisfy;").unwrap();
+        assert_eq!(model.items.len(), 1);
+    }
+
+    #[test]
+    fn test_nqueens_simple() {
+        let source = r#"
+            int: n = 4;
+            array[1..n] of var 1..n: queens;
+            constraint alldifferent(queens);
+            solve satisfy;
+        "#;
+        let model = parse(source).unwrap();
+        assert_eq!(model.items.len(), 4);
+    }
+
+    #[test]
+    fn test_expressions() {
+        let source = r#"
+            constraint x + y > 10;
+            constraint a /\ b \/ c;
+            constraint sum(arr) <= 100;
+        "#;
+        let model = parse(source).unwrap();
+        assert_eq!(model.items.len(), 3);
     }
 }

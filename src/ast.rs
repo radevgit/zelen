@@ -1,167 +1,276 @@
-//! Abstract Syntax Tree (AST) for FlatZinc
+//! Abstract Syntax Tree for MiniZinc Core Subset
 //!
-//! Represents the parsed structure of a FlatZinc model.
+//! Represents the structure of a parsed MiniZinc model.
 
-use crate::tokenizer::Location;
+use std::fmt;
 
-/// A complete FlatZinc model
-#[derive(Debug, Clone)]
-pub struct FlatZincModel {
-    pub predicates: Vec<PredicateDecl>,
-    pub var_decls: Vec<VarDecl>,
-    pub constraints: Vec<Constraint>,
-    pub solve_goal: SolveGoal,
-}
-
-/// Predicate declaration
-#[derive(Debug, Clone)]
-pub struct PredicateDecl {
-    pub name: String,
-    pub params: Vec<PredParam>,
-    pub location: Location,
-}
-
-/// Predicate parameter
-#[derive(Debug, Clone)]
-pub struct PredParam {
-    pub param_type: Type,
-    pub name: String,
-}
-
-/// Variable declaration
-#[derive(Debug, Clone)]
-pub struct VarDecl {
-    pub var_type: Type,
-    pub name: String,
-    pub annotations: Vec<Annotation>,
-    pub init_value: Option<Expr>,
-    pub location: Location,
-}
-
-/// Type in FlatZinc
+/// A complete MiniZinc model
 #[derive(Debug, Clone, PartialEq)]
-pub enum Type {
-    /// Basic types
+pub struct Model {
+    pub items: Vec<Item>,
+}
+
+/// Top-level items in a MiniZinc model
+#[derive(Debug, Clone, PartialEq)]
+pub enum Item {
+    /// Variable or parameter declaration: `int: n = 5;`
+    VarDecl(VarDecl),
+    /// Constraint: `constraint x < y;`
+    Constraint(Constraint),
+    /// Solve item: `solve satisfy;` or `solve minimize x;`
+    Solve(Solve),
+    /// Output item: `output ["x = ", show(x)];`
+    Output(Output),
+}
+
+/// Variable or parameter declaration
+#[derive(Debug, Clone, PartialEq)]
+pub struct VarDecl {
+    pub type_inst: TypeInst,
+    pub name: String,
+    pub expr: Option<Expr>,
+    pub span: Span,
+}
+
+/// Type-inst (type + instantiation)
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeInst {
+    /// Basic type: bool, int, float
+    Basic {
+        is_var: bool,
+        base_type: BaseType,
+    },
+    /// Constrained type: var 1..10, var {1,3,5}
+    Constrained {
+        is_var: bool,
+        base_type: BaseType,
+        domain: Expr,
+    },
+    /// Array type: array[1..n] of var int
+    Array {
+        index_set: Expr,
+        element_type: Box<TypeInst>,
+    },
+}
+
+/// Base types
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BaseType {
     Bool,
     Int,
     Float,
-    
-    /// Integer range: int_min..int_max
-    IntRange(i64, i64),
-    
-    /// Integer set: {1, 2, 3}
-    IntSet(Vec<i64>),
-    
-    /// Float range: float_min..float_max
-    FloatRange(f64, f64),
-    
-    /// Set of int
-    SetOfInt,
-    
-    /// Set with specific domain
-    SetRange(i64, i64),
-    
-    /// Array type: array[index_set] of element_type
-    Array {
-        index_sets: Vec<IndexSet>,
-        element_type: Box<Type>,
-    },
-    
-    /// Variable type (var before the actual type)
-    Var(Box<Type>),
 }
 
-/// Index set for arrays
+/// Constraint item
 #[derive(Debug, Clone, PartialEq)]
-pub enum IndexSet {
-    /// 1..n
-    Range(i64, i64),
-    
-    /// Explicit set
-    Set(Vec<i64>),
-}
-
-/// Constraint statement
-#[derive(Debug, Clone)]
 pub struct Constraint {
-    pub predicate: String,
-    pub args: Vec<Expr>,
-    pub annotations: Vec<Annotation>,
-    pub location: Location,
+    pub expr: Expr,
+    pub span: Span,
 }
 
-/// Solve goal
-#[derive(Debug, Clone)]
-pub enum SolveGoal {
-    Satisfy {
-        annotations: Vec<Annotation>,
-    },
-    Minimize {
-        objective: Expr,
-        annotations: Vec<Annotation>,
-    },
-    Maximize {
-        objective: Expr,
-        annotations: Vec<Annotation>,
-    },
+/// Solve item
+#[derive(Debug, Clone, PartialEq)]
+pub enum Solve {
+    Satisfy { span: Span },
+    Minimize { expr: Expr, span: Span },
+    Maximize { expr: Expr, span: Span },
 }
 
-/// Expression
-#[derive(Debug, Clone)]
-pub enum Expr {
-    /// Boolean literal
-    BoolLit(bool),
-    
-    /// Integer literal
-    IntLit(i64),
-    
-    /// Float literal
-    FloatLit(f64),
-    
-    /// String literal
-    StringLit(String),
-    
-    /// Identifier (variable reference)
+/// Output item
+#[derive(Debug, Clone, PartialEq)]
+pub struct Output {
+    pub expr: Expr,
+    pub span: Span,
+}
+
+/// Expressions
+#[derive(Debug, Clone, PartialEq)]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExprKind {
+    /// Identifier: `x`, `queens`
     Ident(String),
     
-    /// Array literal: [1, 2, 3]
+    /// Boolean literal: `true`, `false`
+    BoolLit(bool),
+    
+    /// Integer literal: `42`, `0`, `-5`
+    IntLit(i64),
+    
+    /// Float literal: `3.14`, `1.0`
+    FloatLit(f64),
+    
+    /// String literal: `"hello"`
+    StringLit(String),
+    
+    /// Array literal: `[1, 2, 3]`
     ArrayLit(Vec<Expr>),
     
-    /// Set literal: {1, 2, 3}
+    /// Set literal: `{1, 2, 3}`
     SetLit(Vec<Expr>),
     
-    /// Integer range: 1..10
+    /// Range: `1..n`, `0..10`
     Range(Box<Expr>, Box<Expr>),
     
-    /// Array access: arr[idx]
+    /// Array access: `x[i]`, `grid[i+1]`
     ArrayAccess {
         array: Box<Expr>,
         index: Box<Expr>,
     },
+    
+    /// Binary operation: `x + y`, `a /\ b`
+    BinOp {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    
+    /// Unary operation: `-x`, `not b`
+    UnOp {
+        op: UnOp,
+        expr: Box<Expr>,
+    },
+    
+    /// Function/predicate call: `sum(x)`, `alldifferent(queens)`
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
+    
+    /// If-then-else: `if x > 0 then 1 else -1 endif`
+    IfThenElse {
+        cond: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Option<Box<Expr>>,
+    },
+    
+    /// Array comprehension: `[i*2 | i in 1..n]`
+    ArrayComp {
+        expr: Box<Expr>,
+        generators: Vec<Generator>,
+    },
+    
+    /// Generator call: `forall(i in 1..n)(x[i] > 0)`
+    GenCall {
+        name: String,
+        generators: Vec<Generator>,
+        body: Box<Expr>,
+    },
 }
 
-/// Annotation (e.g., :: output_var)
-#[derive(Debug, Clone)]
-pub struct Annotation {
-    pub name: String,
-    pub args: Vec<Expr>,
+/// Binary operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    // Arithmetic
+    Add,      // +
+    Sub,      // -
+    Mul,      // *
+    Div,      // div
+    Mod,      // mod
+    FDiv,     // / (float division)
+    
+    // Comparison
+    Lt,       // <
+    Le,       // <=
+    Gt,       // >
+    Ge,       // >=
+    Eq,       // == or =
+    Ne,       // !=
+    
+    // Logical
+    And,      // /\
+    Or,       // \/
+    Impl,     // ->
+    Iff,      // <->
+    Xor,      // xor
+    
+    // Set
+    In,       // in
+    Range,    // ..
 }
 
-impl FlatZincModel {
-    pub fn new() -> Self {
-        FlatZincModel {
-            predicates: Vec::new(),
-            var_decls: Vec::new(),
-            constraints: Vec::new(),
-            solve_goal: SolveGoal::Satisfy {
-                annotations: Vec::new(),
-            },
-        }
+/// Unary operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Neg,      // -
+    Not,      // not
+}
+
+/// Generator in comprehension: `i in 1..n where i > 0`
+#[derive(Debug, Clone, PartialEq)]
+pub struct Generator {
+    pub names: Vec<String>,
+    pub expr: Expr,
+    pub where_clause: Option<Expr>,
+}
+
+/// Source location span for error reporting
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+    
+    pub fn dummy() -> Self {
+        Self { start: 0, end: 0 }
     }
 }
 
-impl Default for FlatZincModel {
-    fn default() -> Self {
-        Self::new()
+// Display implementations for better error messages
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            BinOp::Add => "+",
+            BinOp::Sub => "-",
+            BinOp::Mul => "*",
+            BinOp::Div => "div",
+            BinOp::Mod => "mod",
+            BinOp::FDiv => "/",
+            BinOp::Lt => "<",
+            BinOp::Le => "<=",
+            BinOp::Gt => ">",
+            BinOp::Ge => ">=",
+            BinOp::Eq => "==",
+            BinOp::Ne => "!=",
+            BinOp::And => "/\\",
+            BinOp::Or => "\\/",
+            BinOp::Impl => "->",
+            BinOp::Iff => "<->",
+            BinOp::Xor => "xor",
+            BinOp::In => "in",
+            BinOp::Range => "..",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl fmt::Display for UnOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            UnOp::Neg => "-",
+            UnOp::Not => "not",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl fmt::Display for BaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            BaseType::Bool => "bool",
+            BaseType::Int => "int",
+            BaseType::Float => "float",
+        };
+        write!(f, "{}", s)
     }
 }
