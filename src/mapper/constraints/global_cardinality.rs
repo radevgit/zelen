@@ -48,12 +48,10 @@ impl<'a> MappingContext<'a> {
             });
         }
         
-        // For each value, create a count constraint
-        for (&value, &count_var) in values.iter().zip(counts.iter()) {
-            // Use Selen's count constraint: count(vars, value, count_var)
-            // This constrains: count_var = |{j : vars[j] = value}|
-            self.model.count(&vars, selen::variables::Val::ValI(value), count_var);
-        }
+        // Use Selen's gcc (global cardinality constraint) method
+        // gcc(&vars, values, counts) constrains that for each i,
+        // counts[i] = |{j : vars[j] = values[i]}|
+        self.model.gcc(&vars, &values, &counts);
         
         Ok(())
     }
@@ -103,19 +101,17 @@ impl<'a> MappingContext<'a> {
             });
         }
         
-        // For each value, create a count variable and constrain it with bounds
+        // For each value, constrain count with bounds using at_least and at_most
         for i in 0..values.len() {
             let value = values[i];
             let low_bound = low[i];
             let up_bound = up[i];
             
-            // Create a variable to hold the count with appropriate bounds
-            let count_var = self.model.int(low_bound, up_bound);
-            
-            // Use Selen's count constraint: count(vars, value, count_var)
-            // This constrains: count_var = |{j : vars[j] = value}|
-            // The count_var's domain already enforces low_bound <= count_var <= up_bound
-            self.model.count(&vars, selen::variables::Val::ValI(value), count_var);
+            // Use Selen's at_least and at_most constraints
+            // at_least(&vars, value, n) constrains: at least n vars == value
+            // at_most(&vars, value, n) constrains: at most n vars == value
+            self.model.at_least(&vars, value, low_bound);
+            self.model.at_most(&vars, value, up_bound);
         }
         
         Ok(())
