@@ -85,6 +85,20 @@ impl Error {
         )
     }
     
+    pub fn type_error(expected: &str, found: &str, span: Span) -> Self {
+        Self::new(
+            ErrorKind::TypeError {
+                expected: expected.to_string(),
+                found: found.to_string(),
+            },
+            span,
+        )
+    }
+    
+    pub fn message(msg: &str, span: Span) -> Self {
+        Self::new(ErrorKind::Message(msg.to_string()), span)
+    }
+    
     pub fn with_workaround(mut self, workaround: &str) -> Self {
         if let ErrorKind::UnsupportedFeature { workaround: w, .. } = &mut self.kind {
             *w = Some(workaround.to_string());

@@ -137,8 +137,6 @@ dependencies = [
 [[package]]
 name = "selen"
 version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de7e3219fe3795fcbf1f1d3652447354581a55c7e02934a79439c7a7d9ae144"
 
 [[package]]
 name = "strsim"

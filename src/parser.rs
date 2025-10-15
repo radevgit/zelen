@@ -125,13 +125,24 @@ impl Parser {
                 self.advance()?;
                 Ok(TypeInst::Basic { is_var, base_type: BaseType::Float })
             }
-            TokenKind::IntLit(_) | TokenKind::LBrace => {
-                // Constrained type: 1..10 or {1,3,5}
+            TokenKind::IntLit(_) | TokenKind::FloatLit(_) | TokenKind::LBrace => {
+                // Constrained type: 1..10 or 0.0..1.0 or {1,3,5}
                 let domain = self.parse_range_or_set_expr()?;
                 
                 // Infer base type from domain
                 let base_type = match &domain.kind {
-                    ExprKind::Range(_, _) => BaseType::Int,
+                    ExprKind::BinOp { op: BinOp::Range, left, .. } => {
+                        match &left.kind {
+                            ExprKind::FloatLit(_) => BaseType::Float,
+                            _ => BaseType::Int,
+                        }
+                    }
+                    ExprKind::Range(left, _) => {
+                        match &left.kind {
+                            ExprKind::FloatLit(_) => BaseType::Float,
+                            _ => BaseType::Int,
+                        }
+                    }
                     ExprKind::SetLit(_) => BaseType::Int,
                     _ => BaseType::Int,
                 };

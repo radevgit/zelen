@@ -1,23 +1,64 @@
-//! Zelen - MiniZinc to Selen Compiler
+//! Zelen - MiniZinc Constraint Solver
 //!
-//! This crate implements a compiler that translates a subset of MiniZinc
-//! directly to Selen code, bypassing FlatZinc.
+//! Zelen parses a subset of MiniZinc and translates it directly to Selen models,
+//! bypassing FlatZinc. It can either solve models directly or export them to Rust code.
 
 pub mod ast;
+pub mod compiler;
 pub mod error;
 pub mod lexer;
 pub mod parser;
+pub mod translator;
 
 pub use ast::*;
+pub use compiler::Compiler;
 pub use error::{Error, Result};
 pub use lexer::Lexer;
 pub use parser::Parser;
+pub use translator::{Translator, TranslatedModel};
 
-/// Parse a MiniZinc model from source text
-pub fn parse(source: &str) -> Result<Model> {
+// Re-export Selen for convenience
+pub use selen;
+
+/// Parse a MiniZinc model from source text into an AST
+pub fn parse(source: &str) -> Result<ast::Model> {
     let lexer = Lexer::new(source);
     let mut parser = Parser::new(lexer).with_source(source.to_string());
     parser.parse_model()
+}
+
+/// Translate a MiniZinc AST to a Selen model
+pub fn translate(ast: &ast::Model) -> Result<selen::prelude::Model> {
+    Translator::translate(ast)
+}
+
+/// Parse and translate MiniZinc source directly to a Selen model
+pub fn build_model(source: &str) -> Result<selen::prelude::Model> {
+    let ast = parse(source)?;
+    translate(&ast)
+}
+
+/// Solve a MiniZinc model and return the solution
+/// 
+/// Returns a `Result<Solution>` where the outer `Result` is from Zelen (parsing/translation errors)
+/// and the inner `Result` is from Selen (solving errors).
+/// 
+/// # Example
+/// ```ignore
+/// let solution = zelen::solve(source)??;  // Note the double ? for both Results
+/// println!("Found solution");
+/// ```
+pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, selen::core::SolverError>> {
+    let model = build_model(source)?;
+    Ok(model.solve())
+}
+
+/// Compile a MiniZinc model to Rust code (for code generation)
+#[deprecated(note = "Use build_model() to create Selen models directly")]
+pub fn compile(source: &str) -> Result<String> {
+    let model = parse(source)?;
+    let mut compiler = Compiler::new();
+    compiler.compile(&model)
 }
 
 #[cfg(test)]
