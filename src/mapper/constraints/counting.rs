@@ -23,7 +23,8 @@ impl<'a> MappingContext<'a> {
         let value = self.extract_int(&constraint.args[1])?;
         let count_var = self.get_var_or_const(&constraint.args[2])?;
         
-        // Use Selen's count constraint
+        // Use Selen's count constraint: count(&vars, value, count_var)
+        // This constrains: count_var = |{i : vars[i] = value}|
         self.model.count(&arr_vars, selen::variables::Val::ValI(value), count_var);
         Ok(())
     }

@@ -5,7 +5,7 @@
   "version": "0.2.0",
   "mznlib": "/full/path/to/zelen/mznlib",
   "executable": "/full/path/to/zelen/target/release/zelen",
-  "tags": ["cp", "int", "float", "bool"],
+  "tags": ["cp", "lp", "int", "float", "bool"],
   "stdFlags": ["-a", "-f", "-n", "-p", "-r", "-s", "-t", "-v"],
   "extraFlags": [
     ["--mem-limit", "Memory limit in MB (default: 2000)", "int", ""],
