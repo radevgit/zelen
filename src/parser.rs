@@ -162,12 +162,42 @@ impl Parser {
         }
     }
     
-    /// Parse array type: `array[1..n] of var int`
+    /// Parse array type: `array[1..n] of var int` or `array[int] of int`
     fn parse_array_type_inst(&mut self) -> Result<TypeInst> {
         self.expect(TokenKind::Array)?;
         self.expect(TokenKind::LBracket)?;
         
-        let index_set = self.parse_expr()?;
+        // Handle implicit index sets: array[int], array[bool], array[float]
+        let index_set = match &self.current_token.kind {
+            TokenKind::Int => {
+                let span = self.current_token.span;
+                self.advance()?;
+                Expr {
+                    kind: ExprKind::ImplicitIndexSet(BaseType::Int),
+                    span,
+                }
+            }
+            TokenKind::Bool => {
+                let span = self.current_token.span;
+                self.advance()?;
+                Expr {
+                    kind: ExprKind::ImplicitIndexSet(BaseType::Bool),
+                    span,
+                }
+            }
+            TokenKind::Float => {
+                let span = self.current_token.span;
+                self.advance()?;
+                Expr {
+                    kind: ExprKind::ImplicitIndexSet(BaseType::Float),
+                    span,
+                }
+            }
+            _ => {
+                // Regular index set expression: array[1..n]
+                self.parse_expr()?
+            }
+        };
         
         self.expect(TokenKind::RBracket)?;
         self.expect(TokenKind::Of)?;
@@ -737,5 +767,26 @@ mod tests {
         "#;
         let model = parse(source).unwrap();
         assert_eq!(model.items.len(), 3);
+    }
+
+    #[test]
+    fn test_implicit_index_array() {
+        // Test array[int] syntax (implicitly-indexed arrays)
+        let source = r#"
+            array[int] of int: evens = [2, 4, 6, 8];
+        "#;
+        let model = parse(source).unwrap();
+        assert_eq!(model.items.len(), 1);
+        
+        // Verify it's an array with implicit index set
+        if let Item::VarDecl(var_decl) = &model.items[0] {
+            if let TypeInst::Array { index_set, .. } = &var_decl.type_inst {
+                assert!(matches!(index_set.kind, ExprKind::ImplicitIndexSet(BaseType::Int)));
+            } else {
+                panic!("Expected array type");
+            }
+        } else {
+            panic!("Expected var decl");
+        }
     }
 }

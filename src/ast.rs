@@ -160,6 +160,9 @@ pub enum ExprKind {
         generators: Vec<Generator>,
         body: Box<Expr>,
     },
+    
+    /// Implicit index set for arrays: `int` in `array[int]`
+    ImplicitIndexSet(BaseType),
 }
 
 /// Binary operators
