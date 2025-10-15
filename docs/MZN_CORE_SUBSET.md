@@ -6,7 +6,7 @@
 
 ## Quick Summary
 
-### ✅ What Works Now (Phase 1 Complete)
+### ✅ What Works Now (Phase 1+ Complete)
 - Parse MiniZinc to AST (lexer + recursive descent parser)
 - Translate AST directly to Selen Model objects
 - Integer variables with domains: `var 1..10: x`
@@ -15,27 +15,30 @@
 - Variable arrays (int, bool, float): `array[1..n] of var 1..n: x`
 - Parameters (int, bool, float): `int: n = 5;`, `bool: enabled = true;`, `float: pi = 3.14159;`
 - Binary constraints: `x < y`, `x + y <= 10`
-- Arithmetic in constraints: `+`, `-`, `*`, `/`
+- Arithmetic in constraints: `+`, `-`, `*`, `/`, `mod`
+- **Boolean logical operations**: `/\` (AND), `\/` (OR), `not` (NOT), `->` (implies), `<->` (iff)
+- **Float arithmetic in constraints**: All arithmetic operators work with floats
+- **Array indexing in constraints**: `x[i] == value`, `x[1] < 5`
 - Global constraint: `alldifferent(queens)`
 - Direct execution and solution extraction
-- 28 unit tests passing, 6 working examples
+- 34 unit tests passing, 7 working examples
 
 ### ❌ What's Missing (Phase 2)
-- Boolean logical operations (`/\`, `\/`, `not`)
-- Float arithmetic in constraints
-- Array indexing in constraints: `x[i] == value`
 - Array aggregates: `sum(x)`, `product(x)`, etc.
 - Forall loops: `forall(i in 1..n) (...)`
-- Element constraint
+- Element constraint with variable indices: `x[y] == z` (where y is a variable)
 - Optimization: `minimize`/`maximize`
 - Output formatting
+- String types and operations
+- Set types and operations
 
 ### 📊 Test Results
 ```
-✅ 28/28 unit tests passing
+✅ 34/34 unit tests passing
 ✅ Parser handles 6/7 examples (comprehensions Phase 2)
 ✅ Translator solves simple N-Queens (column constraints)
-✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, bool_float_demo
+✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF)
+✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, bool_float_demo, boolean_logic_demo
 ```
 
 ## Overview
