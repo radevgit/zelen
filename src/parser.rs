@@ -650,10 +650,19 @@ impl Parser {
             self.advance()?;
             Ok(())
         } else {
+            // For better error reporting, point to the location where we expected the token
+            // If it's at the beginning of a new line, point to the end of previous line
+            let error_span = if self.current_token.span.start > 0 {
+                // Look back one character - this often points to end of previous token
+                Span::new(self.current_token.span.start.saturating_sub(1), self.current_token.span.start)
+            } else {
+                self.current_token.span
+            };
+            
             Err(self.add_source_to_error(Error::unexpected_token(
                 &format!("{:?}", expected),
                 &format!("{:?}", self.current_token.kind),
-                self.current_token.span,
+                error_span,
             )))
         }
     }

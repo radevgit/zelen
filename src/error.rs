@@ -97,8 +97,15 @@ impl Error {
         if let Some(source) = &self.source {
             let mut line = 1;
             let mut col = 1;
+            let pos = if self.span.start >= source.len() {
+                // For EOF errors, point to the last character
+                source.len().saturating_sub(1)
+            } else {
+                self.span.start
+            };
+            
             for (i, c) in source.chars().enumerate() {
-                if i >= self.span.start {
+                if i >= pos {
                     break;
                 }
                 if c == '\n' {
@@ -115,15 +122,24 @@ impl Error {
     }
     
     /// Get the line of source code where the error occurred
-    pub fn source_line(&self) -> Option<String> {
+    pub fn source_line(&self) -> Option<(String, usize)> {
         self.source.as_ref().map(|source| {
             let lines: Vec<&str> = source.lines().collect();
-            let (line_num, _) = self.location();
-            if line_num > 0 && line_num <= lines.len() {
+            let (line_num, col) = self.location();
+            let line = if line_num > 0 && line_num <= lines.len() {
                 lines[line_num - 1].to_string()
             } else {
                 String::new()
-            }
+            };
+            
+            // For EOF errors at position beyond line length, point to end of line
+            let adjusted_col = if col > line.len() {
+                line.len()
+            } else {
+                col
+            };
+            
+            (line, adjusted_col)
         })
     }
 }
@@ -182,11 +198,13 @@ impl fmt::Display for Error {
             }
         }?;
         
-        if let Some(source_line) = self.source_line() {
+        if let Some((source_line, col)) = self.source_line() {
             write!(f, "\n  {}", source_line)?;
-            let (_, col) = self.location();
             if col > 0 {
                 write!(f, "\n  {}{}", " ".repeat(col - 1), "^")?;
+            } else if source_line.is_empty() && matches!(self.kind, ErrorKind::UnexpectedEof) {
+                // For EOF on empty line, show caret at start
+                write!(f, "\n  ^")?;
             }
         }
         
