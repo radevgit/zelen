@@ -122,9 +122,19 @@ impl TranslatorContext {
 pub struct Translator {
     model: selen::model::Model,
     context: TranslatorContext,
+    objective_type: ObjectiveType,
+    objective_var: Option<VarId>,
 }
 
 /// Result of translation containing the model and variable mappings
+/// Optimization objective type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectiveType {
+    Satisfy,
+    Minimize,
+    Maximize,
+}
+
 pub struct TranslatedModel {
     pub model: selen::model::Model,
     pub int_vars: HashMap<String, VarId>,
@@ -133,6 +143,8 @@ pub struct TranslatedModel {
     pub bool_var_arrays: HashMap<String, Vec<VarId>>,
     pub float_vars: HashMap<String, VarId>,
     pub float_var_arrays: HashMap<String, Vec<VarId>>,
+    pub objective_type: ObjectiveType,
+    pub objective_var: Option<VarId>,
 }
 
 impl Translator {
@@ -140,6 +152,8 @@ impl Translator {
         Self {
             model: selen::model::Model::default(),
             context: TranslatorContext::new(),
+            objective_type: ObjectiveType::Satisfy,
+            objective_var: None,
         }
     }
 
@@ -172,6 +186,8 @@ impl Translator {
             bool_var_arrays: translator.context.bool_var_arrays,
             float_vars: translator.context.float_vars,
             float_var_arrays: translator.context.float_var_arrays,
+            objective_type: translator.objective_type,
+            objective_var: translator.objective_var,
         })
     }
 
@@ -602,25 +618,18 @@ impl Translator {
         match solve {
             ast::Solve::Satisfy { .. } => {
                 // Default behavior - no optimization
+                self.objective_type = ObjectiveType::Satisfy;
+                self.objective_var = None;
             }
             ast::Solve::Minimize { expr, .. } => {
                 let var = self.get_var_or_value(expr)?;
-                // Selen's minimize is called during solve, not here
-                // We'd need to store this and use it when solving
-                // For now, skip
-                return Err(Error::unsupported_feature(
-                    "Minimize objective",
-                    "Phase 1",
-                    ast::Span::dummy(),
-                ));
+                self.objective_type = ObjectiveType::Minimize;
+                self.objective_var = Some(var);
             }
             ast::Solve::Maximize { expr, .. } => {
                 let var = self.get_var_or_value(expr)?;
-                return Err(Error::unsupported_feature(
-                    "Maximize objective",
-                    "Phase 1",
-                    ast::Span::dummy(),
-                ));
+                self.objective_type = ObjectiveType::Maximize;
+                self.objective_var = Some(var);
             }
         }
         Ok(())
@@ -757,9 +766,117 @@ impl Translator {
                     array.span,
                 ))
             }
+            ast::ExprKind::Call { name, args } => {
+                // Handle aggregate functions
+                self.translate_aggregate_call(name, args, expr.span)
+            }
             _ => Err(Error::unsupported_feature(
                 &format!("Expression type: {:?}", expr.kind),
                 "Phase 2",
+                expr.span,
+            )),
+        }
+    }
+
+    /// Translate aggregate function calls (sum, min, max, etc.)
+    fn translate_aggregate_call(&mut self, name: &str, args: &[ast::Expr], span: ast::Span) -> Result<VarId> {
+        match name {
+            "sum" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Get the array
+                let vars = self.get_array_vars(&args[0])?;
+                Ok(self.model.sum(&vars))
+            }
+            "min" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                let vars = self.get_array_vars(&args[0])?;
+                self.model.min(&vars).map_err(|e| Error::message(
+                    &format!("min() requires at least one variable: {:?}", e),
+                    span,
+                ))
+            }
+            "max" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                let vars = self.get_array_vars(&args[0])?;
+                self.model.max(&vars).map_err(|e| Error::message(
+                    &format!("max() requires at least one variable: {:?}", e),
+                    span,
+                ))
+            }
+            "product" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Product doesn't have a built-in Selen function for arrays
+                // We need to multiply all elements together
+                let vars = self.get_array_vars(&args[0])?;
+                if vars.is_empty() {
+                    return Err(Error::message("product() requires at least one variable", span));
+                }
+                
+                // Start with the first variable and multiply the rest
+                let mut result = vars[0];
+                for &var in &vars[1..] {
+                    result = self.model.mul(result, var);
+                }
+                Ok(result)
+            }
+            _ => Err(Error::unsupported_feature(
+                &format!("Function '{}'", name),
+                "Phase 2",
+                span,
+            )),
+        }
+    }
+
+    /// Get array variables from an expression (handles identifiers and literals)
+    fn get_array_vars(&mut self, expr: &ast::Expr) -> Result<Vec<VarId>> {
+        match &expr.kind {
+            ast::ExprKind::Ident(array_name) => {
+                // Try each array type
+                if let Some(vars) = self.context.get_int_var_array(array_name) {
+                    return Ok(vars.clone());
+                }
+                if let Some(vars) = self.context.get_bool_var_array(array_name) {
+                    return Ok(vars.clone());
+                }
+                if let Some(vars) = self.context.get_float_var_array(array_name) {
+                    return Ok(vars.clone());
+                }
+                Err(Error::message(
+                    &format!("Undefined array variable: '{}'", array_name),
+                    expr.span,
+                ))
+            }
+            _ => Err(Error::type_error(
+                "array identifier",
+                "other expression",
                 expr.span,
             )),
         }
@@ -1106,5 +1223,140 @@ mod tests {
         
         let result = Translator::translate(&ast);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_translate_sum_aggregate() {
+        let source = r#"
+            array[1..3] of var 1..10: values;
+            constraint sum(values) == 15;
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let solution = model_data.model.solve();
+        assert!(solution.is_ok());
+    }
+
+    #[test]
+    fn test_translate_min_aggregate() {
+        let source = r#"
+            array[1..3] of var 1..10: values;
+            constraint min(values) >= 5;
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify the constraint: all values should be >= 5
+        if let Some(values_arr) = model_data.int_var_arrays.get("values") {
+            let solution = sol.unwrap();
+            for var_id in values_arr {
+                let val = solution.get_int(*var_id);
+                assert!(val >= 5, "Expected all values >= 5, but got {}", val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_translate_max_aggregate() {
+        let source = r#"
+            array[1..3] of var 1..10: values;
+            constraint max(values) <= 7;
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify the constraint: all values should be <= 7
+        if let Some(values_arr) = model_data.int_var_arrays.get("values") {
+            let solution = sol.unwrap();
+            for var_id in values_arr {
+                let val = solution.get_int(*var_id);
+                assert!(val <= 7, "Expected all values <= 7, but got {}", val);
+            }
+        }
+    }
+
+    #[test]
+    fn test_translate_product_aggregate() {
+        let source = r#"
+            array[1..3] of var 2..4: factors;
+            constraint product(factors) == 24;
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify the constraint
+        if let Some(factors_arr) = model_data.int_var_arrays.get("factors") {
+            let solution = sol.unwrap();
+            let mut product = 1;
+            for var_id in factors_arr {
+                let val = solution.get_int(*var_id);
+                product *= val;
+            }
+            assert_eq!(product, 24, "Expected product == 24, but got {}", product);
+        }
+    }
+
+    #[test]
+    fn test_translate_minimize() {
+        let source = r#"
+            var 1..10: x;
+            constraint x >= 3;
+            solve minimize x;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        let model_data = result.unwrap();
+        assert_eq!(model_data.objective_type, ObjectiveType::Minimize);
+        assert!(model_data.objective_var.is_some());
+    }
+
+    #[test]
+    fn test_translate_maximize() {
+        let source = r#"
+            var 1..10: x;
+            constraint x <= 7;
+            solve maximize x;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        let model_data = result.unwrap();
+        assert_eq!(model_data.objective_type, ObjectiveType::Maximize);
+        assert!(model_data.objective_var.is_some());
     }
 }

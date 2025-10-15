@@ -6,7 +6,7 @@
 
 ## Quick Summary
 
-### ✅ What Works Now (Phase 1+ Complete)
+### ✅ What Works Now (Phase 1 & 2 Features)
 - Parse MiniZinc to AST (lexer + recursive descent parser)
 - Translate AST directly to Selen Model objects
 - Integer variables with domains: `var 1..10: x`
@@ -18,27 +18,31 @@
 - Arithmetic in constraints: `+`, `-`, `*`, `/`, `mod`
 - **Boolean logical operations**: `/\` (AND), `\/` (OR), `not` (NOT), `->` (implies), `<->` (iff)
 - **Float arithmetic in constraints**: All arithmetic operators work with floats
-- **Array indexing in constraints**: `x[i] == value`, `x[1] < 5`
+- **Array indexing in constraints**: `x[i] == value`, `x[1] < 5` (constant indices)
+- **Array aggregates**: `sum(arr)`, `min(arr)`, `max(arr)`, `product(arr)`
+- **Optimization**: `solve minimize expr;`, `solve maximize expr;`
 - Global constraint: `alldifferent(queens)`
 - Direct execution and solution extraction
-- 34 unit tests passing, 7 working examples
+- 40 unit tests passing, 8 working examples
 
-### ❌ What's Missing (Phase 2)
-- Array aggregates: `sum(x)`, `product(x)`, etc.
+### ❌ What's Missing (Phase 3)
 - Forall loops: `forall(i in 1..n) (...)`
 - Element constraint with variable indices: `x[y] == z` (where y is a variable)
-- Optimization: `minimize`/`maximize`
 - Output formatting
 - String types and operations
 - Set types and operations
+- Additional aggregates: `count`, `exists`, `all`
 
 ### 📊 Test Results
 ```
-✅ 34/34 unit tests passing
-✅ Parser handles 6/7 examples (comprehensions Phase 2)
+✅ 40/40 unit tests passing
+✅ Parser handles 6/7 examples (comprehensions Phase 3)
 ✅ Translator solves simple N-Queens (column constraints)
 ✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF)
-✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, bool_float_demo, boolean_logic_demo
+✅ Array aggregates working (sum, min, max, product)
+✅ Optimization working (minimize, maximize)
+✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
+            bool_float_demo, boolean_logic_demo, phase2_demo
 ```
 
 ## Overview
@@ -176,28 +180,49 @@ x != y             % ✅ model.new(x.ne(y))
 - ❌ `x mod y` (not yet implemented)
 - ❌ Arithmetic expressions in variable declarations (e.g., `var x+1..y`)
 
-#### Boolean Expressions ❌
+#### Boolean Expressions ✅
 ```minizinc
-% Logical operations - NOT YET IMPLEMENTED
-a /\ b           % AND
-a \/ b           % OR
-a -> b           % Implication
-a <-> b          % Bi-implication
-not a            % Negation
-a xor b          % Exclusive OR
+% Logical operations - ✅ IMPLEMENTED
+a /\ b           % ✅ AND - model.bool_and(&[a, b])
+a \/ b           % ✅ OR - model.bool_or(&[a, b])
+a -> b           % ✅ Implication - model.implies(a, b)
+a <-> b          % ✅ Bi-implication (iff) - double implication
+not a            % ✅ Negation - model.bool_not(a)
+a xor b          % ❌ Exclusive OR (not yet)
 ```
 
-**Status:** Phase 2
+**Status:**
+- ✅ All basic boolean operations use Selen's reification API
+- ✅ Boolean operations return VarId (can be used in expressions)
+- ✅ Works in constraints: `constraint raining -> umbrella;`
+- ✅ Compound expressions: `constraint (a /\ b) \/ c;`
+- ❌ XOR - Phase 3
 
 #### Array Operations ❌
 ```minizinc
-% Array access - NOT YET IMPLEMENTED
-x[i]
-x[i+1]
+#### Array Operations ✅
+```minizinc
+% Array access with constant indices - ✅ IMPLEMENTED
+x[i]              % ✅ Where i is a constant or parameter
+x[1]              % ✅ Constant index
+x[i+1]            % ✅ Expression index (evaluated at translation time)
+
+% Array aggregates - ✅ IMPLEMENTED
+sum(x)            % ✅ model.sum(&x) - sum of array elements
+min(x)            % ✅ model.min(&x) - minimum value
+max(x)            % ✅ model.max(&x) - maximum value
+product(x)        % ✅ Chained multiplication
 
 % Array literals - PARSED but not in constraints yet
 [1, 2, 3, 4, 5]
 [x, y, z]
+```
+
+**Status:**
+- ✅ Array access with constant/parameter indices
+- ✅ Array aggregates in constraints: `sum(arr) == 10`, `min(arr) >= 5`
+- ❌ Variable array indices (`x[y]` where y is a variable) - Phase 3
+- ❌ Array literals in expressions - Phase 3
 
 % Array functions - NOT YET IMPLEMENTED
 sum(x)           % Sum of elements
@@ -248,9 +273,9 @@ constraint (x + 1) - y != 0;    % ✅
 - ✅ Arithmetic in constraints: `+`, `-`, `*`, `/`
 - ✅ Nested expressions
 - ✅ Variable and parameter references
-- ❌ Boolean constraints (`flag1 \/ flag2`) - Phase 2
-- ❌ Implication (`enabled -> (x > 0)`) - Phase 2
-- ❌ Array aggregates (`sum(arr) <= 100`) - Phase 2
+- ✅ Boolean constraints (`flag1 \/ flag2`) - **IMPLEMENTED** via reification
+- ✅ Implication (`enabled -> (x > 0)`) - **IMPLEMENTED**
+- ✅ Array aggregates (`sum(arr) <= 100`) - **IMPLEMENTED**
 
 #### Global Constraints (Priority Order)
 
@@ -263,8 +288,9 @@ constraint all_different(x);    % ✅ Alias supported
 
 **Status:**
 - ✅ `alldifferent` / `all_different` on arrays
-- ❌ `element` constraint - Phase 2
-- ❌ Array indexing in constraints - Phase 2
+- ✅ Array indexing with constants in constraints
+- ❌ `element` constraint (variable indices) - Phase 3
+- ❌ Additional global constraints - Phase 3
 
 **Medium Priority** ❌
 ```minizinc
@@ -291,19 +317,25 @@ constraint global_cardinality(x, cover, counts);
 % Satisfaction problem - ✅ IMPLEMENTED
 solve satisfy;
 
-% Optimization problems - ❌ NOT YET (parsed but not translated)
-solve minimize cost;
-solve maximize profit;
+% Optimization problems - ✅ IMPLEMENTED
+solve minimize cost;              % ✅ Stores objective in TranslatedModel
+solve maximize profit;            % ✅ Application calls model.minimize/maximize
 
-% With annotations - ❌ Phase 2
+% With aggregates - ✅ WORKS
+solve minimize sum(costs);        % ✅ Aggregate expressions supported
+solve maximize max(profits);      % ✅ Complex objectives work
+
+% With annotations - ❌ Phase 3
 solve :: int_search(x, input_order, indomain_min) 
       satisfy;
 ```
 
 **Status:**
-- ✅ `solve satisfy` → Default solving
-- ❌ `solve minimize/maximize` → Phase 2 (Selen supports it, need to wire up)
-- ❌ Search annotations → Phase 2
+- ✅ `solve satisfy` → Default solving with `model.solve()`
+- ✅ `solve minimize expr` → Stores ObjectiveType::Minimize and objective VarId
+- ✅ `solve maximize expr` → Stores ObjectiveType::Maximize and objective VarId
+- ✅ Applications call `model.minimize(var)` or `model.maximize(var)` as needed
+- ❌ Search annotations → Phase 3
 
 ### 1.5 Output Items
 
