@@ -720,45 +720,90 @@ impl Translator {
                     }
                 };
                 
-                // Evaluate the index expression to a constant
-                let index_val = self.eval_int_expr(index)?;
-                
-                // Arrays in MiniZinc are 1-indexed, convert to 0-indexed
-                let array_index = (index_val - 1) as usize;
-                
-                // Try to find the array
-                if let Some(arr) = self.context.get_int_var_array(array_name) {
-                    if array_index < arr.len() {
-                        return Ok(arr[array_index]);
-                    } else {
-                        return Err(Error::message(
-                            &format!("Array index {} out of bounds (array size: {})",
-                                index_val, arr.len()),
-                            index.span,
-                        ));
+                // Try to evaluate the index expression to a constant first
+                if let Ok(index_val) = self.eval_int_expr(index) {
+                    // Constant index - direct array access (existing behavior)
+                    // Arrays in MiniZinc are 1-indexed, convert to 0-indexed
+                    let array_index = (index_val - 1) as usize;
+                    
+                    // Try to find the array
+                    if let Some(arr) = self.context.get_int_var_array(array_name) {
+                        if array_index < arr.len() {
+                            return Ok(arr[array_index]);
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
                     }
+                    if let Some(arr) = self.context.get_bool_var_array(array_name) {
+                        if array_index < arr.len() {
+                            return Ok(arr[array_index]);
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
+                    }
+                    if let Some(arr) = self.context.get_float_var_array(array_name) {
+                        if array_index < arr.len() {
+                            return Ok(arr[array_index]);
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
+                    }
+                    
+                    return Err(Error::message(
+                        &format!("Undefined array: '{}'", array_name),
+                        array.span,
+                    ));
+                }
+                
+                // Variable index - use element constraint
+                // Get the index variable
+                let index_var = self.get_var_or_value(index)?;
+                
+                // MiniZinc arrays are 1-indexed, Selen is 0-indexed
+                // Selen's element constraint requires a direct VarId, not a computed expression
+                // So we create an auxiliary variable and constrain it
+                let one = self.model.int(1, 1);
+                
+                // Get the array and create element constraint
+                if let Some(arr) = self.context.get_int_var_array(array_name) {
+                    let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    
+                    // Create a result variable for array[index]
+                    let result = self.model.int(i32::MIN, i32::MAX);
+                    self.model.element(&arr, zero_based_index, result);
+                    return Ok(result);
                 }
                 if let Some(arr) = self.context.get_bool_var_array(array_name) {
-                    if array_index < arr.len() {
-                        return Ok(arr[array_index]);
-                    } else {
-                        return Err(Error::message(
-                            &format!("Array index {} out of bounds (array size: {})",
-                                index_val, arr.len()),
-                            index.span,
-                        ));
-                    }
+                    let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    
+                    let result = self.model.bool();
+                    self.model.element(&arr, zero_based_index, result);
+                    return Ok(result);
                 }
                 if let Some(arr) = self.context.get_float_var_array(array_name) {
-                    if array_index < arr.len() {
-                        return Ok(arr[array_index]);
-                    } else {
-                        return Err(Error::message(
-                            &format!("Array index {} out of bounds (array size: {})",
-                                index_val, arr.len()),
-                            index.span,
-                        ));
-                    }
+                    let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    
+                    let result = self.model.float(f64::MIN, f64::MAX);
+                    self.model.element(&arr, zero_based_index, result);
+                    return Ok(result);
                 }
                 
                 Err(Error::message(
@@ -846,6 +891,69 @@ impl Translator {
                     result = self.model.mul(result, var);
                 }
                 Ok(result)
+            }
+            "count" => {
+                if args.len() != 2 {
+                    return Err(Error::type_error(
+                        "2 arguments",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Get the array
+                let vars = self.get_array_vars(&args[0])?;
+                
+                // Get the value to count
+                let value = self.get_var_or_value(&args[1])?;
+                
+                // Create a result variable for the count (0 to array length)
+                let count_result = self.model.int(0, vars.len() as i32);
+                
+                // Call Selen's count_var constraint (supports both constant and variable values)
+                self.model.count_var(&vars, value, count_result);
+                
+                Ok(count_result)
+            }
+            "exists" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Get the array (should be boolean variables)
+                let vars = self.get_array_vars(&args[0])?;
+                
+                if vars.is_empty() {
+                    return Err(Error::message("exists() requires at least one variable", span));
+                }
+                
+                // exists = OR of all elements
+                // Returns a boolean variable (0 or 1)
+                Ok(self.model.bool_or(&vars))
+            }
+            "forall" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Get the array (should be boolean variables)
+                let vars = self.get_array_vars(&args[0])?;
+                
+                if vars.is_empty() {
+                    return Err(Error::message("forall() requires at least one variable", span));
+                }
+                
+                // forall = AND of all elements
+                // Returns a boolean variable (0 or 1)
+                Ok(self.model.bool_and(&vars))
             }
             _ => Err(Error::unsupported_feature(
                 &format!("Function '{}'", name),
@@ -1358,5 +1466,201 @@ mod tests {
         let model_data = result.unwrap();
         assert_eq!(model_data.objective_type, ObjectiveType::Maximize);
         assert!(model_data.objective_var.is_some());
+    }
+
+    #[test]
+    fn test_element_constraint_variable_index() {
+        let source = r#"
+            array[1..5] of var 1..10: values;
+            var 1..5: index;
+            var 1..10: result;
+            
+            % Element constraint: result == values[index]
+            constraint result == values[index];
+            constraint index == 3;
+            constraint result == 7;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: index should be 3, result should be 7, values[3] should be 7
+        let solution = sol.unwrap();
+        if let Some(&index_var) = model_data.int_vars.get("index") {
+            assert_eq!(solution.get_int(index_var), 3);
+        }
+        if let Some(&result_var) = model_data.int_vars.get("result") {
+            assert_eq!(solution.get_int(result_var), 7);
+        }
+        if let Some(values_arr) = model_data.int_var_arrays.get("values") {
+            // values[3] (0-indexed: values[2]) should be 7
+            assert_eq!(solution.get_int(values_arr[2]), 7);
+        }
+    }
+
+    #[test]
+    fn test_element_constraint_in_expression() {
+        let source = r#"
+            array[1..4] of var 1..10: arr;
+            var 1..4: i;
+            
+            % Use element in a constraint expression
+            constraint arr[i] > 5;
+            constraint i == 2;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: arr[2] should be > 5
+        let solution = sol.unwrap();
+        if let Some(arr) = model_data.int_var_arrays.get("arr") {
+            let val_at_index_2 = solution.get_int(arr[1]); // 0-indexed
+            assert!(val_at_index_2 > 5, "Expected arr[2] > 5, got {}", val_at_index_2);
+        }
+    }
+
+    #[test]
+    fn test_count_aggregate() {
+        let source = r#"
+            array[1..5] of var 1..5: values;
+            var 0..5: count_result;
+            
+            % Count how many values equal 3
+            constraint count_result == count(values, 3);
+            
+            % Set some values to 3
+            constraint values[1] == 3;
+            constraint values[2] == 3;
+            constraint values[3] == 3;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: count_result should be 3
+        let solution = sol.unwrap();
+        if let Some(&count_var) = model_data.int_vars.get("count_result") {
+            assert_eq!(solution.get_int(count_var), 3);
+        }
+    }
+
+    #[test]
+    fn test_count_with_constraint() {
+        let source = r#"
+            array[1..4] of var 1..3: values;
+            
+            % At least 2 values must be equal to 2
+            constraint count(values, 2) >= 2;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: at least 2 values should be 2
+        let solution = sol.unwrap();
+        if let Some(values_arr) = model_data.int_var_arrays.get("values") {
+            let count_2s: i32 = values_arr.iter()
+                .map(|&v| solution.get_int(v))
+                .filter(|&val| val == 2)
+                .count() as i32;
+            assert!(count_2s >= 2, "Expected at least 2 values equal to 2, got {}", count_2s);
+        }
+    }
+
+    #[test]
+    fn test_exists_aggregate() {
+        let source = r#"
+            array[1..4] of var bool: flags;
+            var bool: any_true;
+            
+            % at least one flag must be true
+            constraint any_true == exists(flags);
+            constraint any_true;  % Force it to be true
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: at least one flag should be true
+        let solution = sol.unwrap();
+        if let Some(flags_arr) = model_data.bool_var_arrays.get("flags") {
+            let any_true = flags_arr.iter()
+                .map(|&v| solution.get_int(v))
+                .any(|val| val != 0);
+            assert!(any_true, "Expected at least one flag to be true");
+        }
+    }
+
+    #[test]
+    fn test_forall_aggregate() {
+        let source = r#"
+            array[1..4] of var bool: flags;
+            var bool: all_true;
+            
+            % all flags must be true
+            constraint all_true == forall(flags);
+            constraint all_true;  % Force it to be true
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok());
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        assert!(sol.is_ok());
+        
+        // Verify: all flags should be true
+        let solution = sol.unwrap();
+        if let Some(flags_arr) = model_data.bool_var_arrays.get("flags") {
+            let all_true = flags_arr.iter()
+                .map(|&v| solution.get_int(v))
+                .all(|val| val != 0);
+            assert!(all_true, "Expected all flags to be true");
+        }
     }
 }

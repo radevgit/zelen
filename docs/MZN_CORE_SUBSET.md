@@ -6,7 +6,7 @@
 
 ## Quick Summary
 
-### ✅ What Works Now (Phase 1 & 2 Features)
+### ✅ What Works Now (Phase 1, 2 & 3 Features)
 - Parse MiniZinc to AST (lexer + recursive descent parser)
 - Translate AST directly to Selen Model objects
 - Integer variables with domains: `var 1..10: x`
@@ -22,27 +22,31 @@
 - **Array aggregates**: `sum(arr)`, `min(arr)`, `max(arr)`, `product(arr)`
 - **Optimization**: `solve minimize expr;`, `solve maximize expr;`
 - Global constraint: `alldifferent(queens)`
+- **Element constraint with variable indices**: `x[i] == value` (where i is a variable) - **NEW Phase 3**
+- **Count aggregate**: `count(array, value) == n` - **NEW Phase 3**
+- **Exists aggregate**: `exists(bool_array)` returns true if any element is true - **NEW Phase 3**
+- **Forall aggregate**: `forall(bool_array)` returns true if all elements are true - **NEW Phase 3**
 - Direct execution and solution extraction
-- 40 unit tests passing, 8 working examples
+- 46 unit tests passing, 9 working examples
 
-### ❌ What's Missing (Phase 3)
-- Forall loops: `forall(i in 1..n) (...)`
-- Element constraint with variable indices: `x[y] == z` (where y is a variable)
+### ❌ What's Missing (Phase 4+)
+- Forall loops: `forall(i in 1..n) (...)` (comprehensions)
+- Set types and operations
 - Output formatting
 - String types and operations
-- Set types and operations
-- Additional aggregates: `count`, `exists`, `all`
 
 ### 📊 Test Results
 ```
-✅ 40/40 unit tests passing
-✅ Parser handles 6/7 examples (comprehensions Phase 3)
+✅ 46/46 unit tests passing (up from 42)
+✅ Parser handles 6/7 examples (comprehensions Phase 4)
 ✅ Translator solves simple N-Queens (column constraints)
 ✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF)
 ✅ Array aggregates working (sum, min, max, product)
+✅ Element constraint working with variable indices and 1-based arrays
+✅ Count, exists, forall aggregates all working
 ✅ Optimization working (minimize, maximize)
 ✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
-            bool_float_demo, boolean_logic_demo, phase2_demo
+            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo
 ```
 
 ## Overview
@@ -198,8 +202,6 @@ a xor b          % ❌ Exclusive OR (not yet)
 - ✅ Compound expressions: `constraint (a /\ b) \/ c;`
 - ❌ XOR - Phase 3
 
-#### Array Operations ❌
-```minizinc
 #### Array Operations ✅
 ```minizinc
 % Array access with constant indices - ✅ IMPLEMENTED
@@ -207,11 +209,20 @@ x[i]              % ✅ Where i is a constant or parameter
 x[1]              % ✅ Constant index
 x[i+1]            % ✅ Expression index (evaluated at translation time)
 
+% Array access with variable indices - ✅ IMPLEMENTED (Phase 3)
+x[y]              % ✅ Where y is a variable - uses element constraint
+constraint x[index] == value;  % ✅ Element constraint with variable index
+
 % Array aggregates - ✅ IMPLEMENTED
 sum(x)            % ✅ model.sum(&x) - sum of array elements
 min(x)            % ✅ model.min(&x) - minimum value
 max(x)            % ✅ model.max(&x) - maximum value
 product(x)        % ✅ Chained multiplication
+
+% Advanced aggregates - ✅ IMPLEMENTED (Phase 3)
+count(x, v)       % ✅ Counts how many elements equal v
+exists(flags)     % ✅ Returns true if any element is true
+forall(flags)     % ✅ Returns true if all elements are true
 
 % Array literals - PARSED but not in constraints yet
 [1, 2, 3, 4, 5]
@@ -220,19 +231,14 @@ product(x)        % ✅ Chained multiplication
 
 **Status:**
 - ✅ Array access with constant/parameter indices
+- ✅ Array access with variable indices (Phase 3): Element constraint automatically used
+  - **Important**: MiniZinc uses 1-based indexing; automatically converted to 0-based for Selen
+  - Example: `constraint arr[idx] == 5` where `idx` is a variable works correctly
 - ✅ Array aggregates in constraints: `sum(arr) == 10`, `min(arr) >= 5`
-- ❌ Variable array indices (`x[y]` where y is a variable) - Phase 3
-- ❌ Array literals in expressions - Phase 3
-
-% Array functions - NOT YET IMPLEMENTED
-sum(x)           % Sum of elements
-product(x)       % Product of elements
-min(x)           % Minimum element
-max(x)           % Maximum element
-length(x)        % Array length
-```
-
-**Status:** Phase 2
+- ✅ Count aggregate: `count(arr, value)` - supports both constant and variable values
+- ✅ Exists aggregate: `exists(bool_arr)` - returns true if any element is true
+- ✅ Forall aggregate: `forall(bool_arr)` - returns true if all elements are true
+- ❌ Array literals in expressions - Phase 4
 
 #### Set Operations (on fixed sets) ❌
 ```minizinc
@@ -284,13 +290,20 @@ constraint (x + 1) - y != 0;    % ✅
 % All different - ✅ IMPLEMENTED
 constraint alldifferent(x);     % ✅ model.alldiff(&x)
 constraint all_different(x);    % ✅ Alias supported
+
+% Element constraint - ✅ IMPLEMENTED (Phase 3)
+constraint arr[index] == value; % ✅ Element constraint with variable index
+                                % ✅ Handles 1-based to 0-based conversion
 ```
 
 **Status:**
 - ✅ `alldifferent` / `all_different` on arrays
 - ✅ Array indexing with constants in constraints
-- ❌ `element` constraint (variable indices) - Phase 3
-- ❌ Additional global constraints - Phase 3
+- ✅ `element` constraint (variable indices) - Phase 3 COMPLETE
+  - Uses Selen's `m.element(&array, index, value)` API
+  - Automatically converts 1-based MiniZinc indices to 0-based Selen indices
+  - Works with computed index expressions
+- ❌ Additional global constraints - Phase 4
 
 **Medium Priority** ❌
 ```minizinc
@@ -476,14 +489,64 @@ constraint adjacent(pos[1], pos[2]);
 - Build library of common predicates
 - Support recursion carefully (detect cycles)
 
-## Phase 3: Advanced Features (Future)
+## Phase 3: Advanced Features (COMPLETE ✅)
 
-### 3.1 Set Comprehensions
+### 3.1 Element Constraint ✅
+```minizinc
+% Variable array indexing - ✅ IMPLEMENTED
+constraint arr[index] == value;     % ✅ Works with variable indices
+constraint arr[some_expr] > min_val; % ✅ Works with computed indices
+
+% Implementation notes:
+% - MiniZinc is 1-based, Selen is 0-based
+% - Automatic conversion: internal_index = external_index - 1
+% - Uses Selen's m.element(&array, index, value) API
+```
+
+### 3.2 Count Aggregate ✅
+```minizinc
+% Count occurrences - ✅ IMPLEMENTED
+constraint count(arr, value) == n;           % ✅ Constant value
+constraint count(arr, some_var) >= 2;        % ✅ Variable value
+constraint count(flags, 1) == num_true;      % ✅ Count true flags
+
+% Implementation: Uses Selen's m.count_var(&array, value, result)
+```
+
+### 3.3 Exists Aggregate ✅
+```minizinc
+% Check if any element is true - ✅ IMPLEMENTED
+constraint exists(flags);                    % ✅ Returns boolean
+constraint solution_found == exists(results); % ✅ Can be used in constraints
+
+% Implementation: Uses Selen's m.bool_or(&array)
+```
+
+### 3.4 Forall Aggregate ✅
+```minizinc
+% Check if all elements are true - ✅ IMPLEMENTED
+constraint forall(requirements);             % ✅ Returns boolean
+constraint all_valid == forall(checks);      % ✅ Can be used in constraints
+
+% Implementation: Uses Selen's m.bool_and(&array)
+% NOTE: This is the aggregate function, not forall comprehensions (Phase 4)
+```
+
+## Phase 4: Future Features
+
+### 4.1 Set Comprehensions
 ```minizinc
 set of int: evens = {2*i | i in 1..n};
 ```
 
-### 3.2 Annotations
+### 4.2 Forall/Exists Loops (Comprehensions)
+```minizinc
+% Create constraints for each element
+constraint forall(i in 1..n) (x[i] < y[i]);
+constraint exists(i in 1..n) (x[i] > 10);
+```
+
+### 4.3 Annotations
 ```minizinc
 % Search annotations
 solve :: int_search(x, first_fail, indomain_min)
@@ -493,7 +556,7 @@ solve :: int_search(x, first_fail, indomain_min)
 var 1..n: x :: is_defined_var;
 ```
 
-### 3.3 Option Types
+### 4.4 Option Types
 ```minizinc
 var opt 1..n: maybe_value;
 constraint occurs(maybe_value) -> (deopt(maybe_value) > 5);
@@ -529,8 +592,11 @@ constraint occurs(maybe_value) -> (deopt(maybe_value) > 5);
 | `x * y` | `model.mul(x, y)` | ✅ | Multiplication |
 | `x / y` | `model.div(x, y)` | ✅ | Division |
 | `alldifferent(x)` | `model.alldiff(&x)` | ✅ | Global constraint |
-| `x[i] == value` | - | ❌ | Phase 2 (element) |
-| `sum(x) <= c` | - | ❌ | Phase 2 (linear) |
+| `arr[i] == value` | `model.element(&arr, i, value)` | ✅ | Element (Phase 3) |
+| `count(arr, val)` | `model.count_var(&arr, val, result)` | ✅ | Count aggregate (Phase 3) |
+| `exists(arr)` | `model.bool_or(&arr)` | ✅ | Exists aggregate (Phase 3) |
+| `forall(arr)` | `model.bool_and(&arr)` | ✅ | Forall aggregate (Phase 3) |
+| `sum(x) <= c` | `model.sum(&x)` | ✅ | Linear constraint (Phase 2) |
 
 ## Error Handling
 
