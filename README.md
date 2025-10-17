@@ -38,7 +38,7 @@ Zelen has minimal dependencies:
 
 | Crate | Purpose | Version |
 |-------|---------|---------|
-| [selen](https://github.com/radevgit/selen) | CSP solver backend | 0.9+ |
+| [selen](https://github.com/radevgit/selen) | CSP solver backend | 0.14+ |
 | [clap](https://docs.rs/clap) | CLI argument parsing | 4.5+ |
 
 ## Installation

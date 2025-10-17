@@ -236,6 +236,24 @@ impl Translator {
         Ok(translator.model)
     }
 
+    /// Translate a MiniZinc AST model to a Selen Model with custom configuration
+    pub fn translate_with_config(ast: &ast::Model, config: selen::utils::config::SolverConfig) -> Result<selen::model::Model> {
+        let model = selen::model::Model::with_config(config);
+        let mut translator = Self {
+            model,
+            context: TranslatorContext::new(),
+            objective_type: ObjectiveType::Satisfy,
+            objective_var: None,
+        };
+
+        // Process all items in order
+        for item in &ast.items {
+            translator.translate_item(item)?;
+        }
+
+        Ok(translator.model)
+    }
+
     /// Translate a MiniZinc AST model and return the model with variable mappings
     pub fn translate_with_vars(ast: &ast::Model) -> Result<TranslatedModel> {
         let mut translator = Self::new();

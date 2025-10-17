@@ -78,33 +78,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Print warnings for unsupported features
     if args.free_search {
         if args.verbose {
-            eprintln!("⚠️  Warning: Free search (--free-search) is not yet supported, ignoring");
+            eprintln!("Warning: Free search (--free-search) is not yet supported, ignoring");
         }
     }
     if args.parallel.is_some() {
         if args.verbose {
-            eprintln!("⚠️  Warning: Parallel search (--parallel) is not yet supported, ignoring");
+            eprintln!("Warning: Parallel search (--parallel) is not yet supported, ignoring");
         }
     }
     if args.random_seed.is_some() {
         if args.verbose {
-            eprintln!("⚠️  Warning: Random seed (--random-seed) is not yet supported, ignoring");
+            eprintln!("Warning: Random seed (--random-seed) is not yet supported, ignoring");
         }
     }
-    if args.time > 0 {
+    if args.intermediate {
         if args.verbose {
-            eprintln!("ℹ️  Note: Time limit (--time) is not yet implemented");
-        }
-    }
-    if args.mem_limit > 0 {
-        if args.verbose {
-            eprintln!("ℹ️  Note: Memory limit (--mem-limit) is not yet implemented");
+            eprintln!("Note: Intermediate solutions (--intermediate) will be shown for all solutions");
         }
     }
 
     // Read the MiniZinc source file
     if args.verbose {
-        eprintln!("📖 Reading MiniZinc model file: {}", args.file.display());
+        eprintln!("Reading MiniZinc model file: {}", args.file.display());
     }
     let source = fs::read_to_string(&args.file).map_err(|e| {
         format!("Failed to read file '{}': {}", args.file.display(), e)
@@ -113,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Read optional data file
     let data_source = if let Some(ref data_file) = args.data_file {
         if args.verbose {
-            eprintln!("📖 Reading MiniZinc data file: {}", data_file.display());
+            eprintln!("Reading MiniZinc data file: {}", data_file.display());
         }
         let data_content = fs::read_to_string(data_file).map_err(|e| {
             format!("Failed to read data file '{}': {}", data_file.display(), e)
@@ -126,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Combine model and data sources
     let combined_source = if let Some(data) = data_source {
         if args.verbose {
-            eprintln!("📝 Merging model and data sources...");
+            eprintln!("Merging model and data sources...");
         }
         format!("{}\n{}", source, data)
     } else {
@@ -135,15 +130,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse the combined MiniZinc source
     if args.verbose {
-        eprintln!("🔍 Parsing MiniZinc source...");
+        eprintln!("Parsing MiniZinc source...");
     }
     let ast = parse(&combined_source).map_err(|e| {
         format!("Parse error: {:?}", e)
     })?;
 
+    // Create solver configuration from command-line arguments
+    let mut config = zelen::SolverConfig::default();
+    if args.time > 0 {
+        config = config.with_time_limit_ms(args.time);
+    }
+    if args.mem_limit > 0 {
+        config = config.with_memory_limit_mb(args.mem_limit);
+    }
+    if args.all_solutions {
+        config = config.with_all_solutions(true);
+    }
+    if let Some(max_sols) = args.num_solutions {
+        config = config.with_max_solutions(max_sols);
+    }
+
     // Translate to Selen model
     if args.verbose {
-        eprintln!("🔄 Translating to Selen model...");
+        eprintln!("Translating to Selen model...");
     }
     let model_data = Translator::translate_with_vars(&ast).map_err(|e| {
         format!("Translation error: {:?}", e)
@@ -151,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.verbose {
         eprintln!(
-            "✅ Model created successfully with {} variables",
+            "Model created successfully with {} variables",
             model_data.int_vars.len()
                 + model_data.bool_vars.len()
                 + model_data.float_vars.len()
@@ -163,7 +173,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Solve the model
     if args.verbose {
-        eprintln!("⚙️  Starting solver...");
+        eprintln!("Starting solver...");
+        if args.time > 0 {
+            eprintln!("Time limit: {} ms", args.time);
+        }
+        if args.mem_limit > 0 {
+            eprintln!("Memory limit: {} MB", args.mem_limit);
+        }
+        if args.all_solutions {
+            eprintln!("Finding all solutions...");
+        }
+        if let Some(max_sols) = args.num_solutions {
+            eprintln!("Stopping after {} solutions", max_sols);
+        }
     }
     let start_time = Instant::now();
 
@@ -171,52 +193,85 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let obj_type = model_data.objective_type;
     let obj_var = model_data.objective_var;
     
-    let solution_result = match (obj_type, obj_var) {
-        (ObjectiveType::Minimize, Some(obj_var)) => {
-            if args.verbose {
-                eprintln!("📉 Minimizing objective...");
-            }
-            model_data.model.minimize(obj_var)
+    // Build a new model with config for solving
+    let model_with_config = zelen::build_model_with_config(&combined_source, config.clone()).map_err(|e| {
+        format!("Failed to build model with config: {}", e)
+    })?;
+    
+    let solutions = if args.all_solutions || args.num_solutions.is_some() {
+        // Enumerate multiple solutions
+        if args.verbose {
+            eprintln!("Enumerating solutions...");
         }
-        (ObjectiveType::Maximize, Some(obj_var)) => {
-            if args.verbose {
-                eprintln!("📈 Maximizing objective...");
+        let max = args.num_solutions.unwrap_or(usize::MAX);
+        model_with_config.enumerate().take(max).collect::<Vec<_>>()
+    } else {
+        // Single solution - may be optimal for minimize/maximize
+        match (obj_type, obj_var) {
+            (ObjectiveType::Minimize, Some(obj_var)) => {
+                if args.verbose {
+                    eprintln!("Minimizing objective...");
+                }
+                match model_with_config.minimize(obj_var) {
+                    Ok(solution) => vec![solution],
+                    Err(_) => Vec::new(),
+                }
             }
-            model_data.model.maximize(obj_var)
-        }
-        (ObjectiveType::Satisfy, _) => {
-            if args.verbose {
-                eprintln!("✓ Solving satisfaction problem...");
+            (ObjectiveType::Maximize, Some(obj_var)) => {
+                if args.verbose {
+                    eprintln!("Maximizing objective...");
+                }
+                match model_with_config.maximize(obj_var) {
+                    Ok(solution) => vec![solution],
+                    Err(_) => Vec::new(),
+                }
             }
-            model_data.model.solve()
+            (ObjectiveType::Satisfy, _) => {
+                if args.verbose {
+                    eprintln!("Solving satisfaction problem...");
+                }
+                match model_with_config.solve() {
+                    Ok(solution) => vec![solution],
+                    Err(_) => Vec::new(),
+                }
+            }
+            _ => match model_with_config.solve() {
+                Ok(solution) => vec![solution],
+                Err(_) => Vec::new(),
+            }
         }
-        _ => model_data.model.solve(),
     };
 
     let elapsed = start_time.elapsed();
 
-    match solution_result {
-        Ok(solution) => {
-            if args.verbose {
-                eprintln!("✅ Solution found in {:?}", elapsed);
+    if !solutions.is_empty() {
+        if args.verbose {
+            if solutions.len() == 1 {
+                eprintln!("Solution found in {:?}", elapsed);
+            } else {
+                eprintln!("Found {} solutions in {:?}", solutions.len(), elapsed);
             }
+        }
 
-            // Print solution in MiniZinc format
+        // Print all solutions in MiniZinc format
+        for (idx, solution) in solutions.iter().enumerate() {
+            if idx > 0 {
+                println!("----------");
+            }
             print_solution(&solution, &model_data.int_vars, &model_data.bool_vars,
                           &model_data.float_vars, &model_data.int_var_arrays,
                           &model_data.bool_var_arrays, &model_data.float_var_arrays,
-                          args.statistics, elapsed)?;
+                          args.statistics && idx == solutions.len() - 1, elapsed)?;
         }
-        Err(_e) => {
-            if args.verbose {
-                eprintln!("❌ No solution found");
-            }
-            println!("=====UNSATISFIABLE=====");
-            if args.statistics {
-                println!("%%%mzn-stat: solveTime={:.3}", elapsed.as_secs_f64());
-            }
-            return Ok(());
+    } else {
+        if args.verbose {
+            eprintln!("No solution found");
         }
+        println!("=====UNSATISFIABLE=====");
+        if args.statistics {
+            println!("%%%mzn-stat: solveTime={:.3}", elapsed.as_secs_f64());
+        }
+        return Ok(());
     }
 
     Ok(())
