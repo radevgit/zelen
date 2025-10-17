@@ -61,14 +61,6 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-zelen = { path = "../zelen" }
-selen = { path = "../selen" }  # Also needed for solution access
-```
-
-Or if published to crates.io:
-
-```toml
-[dependencies]
 zelen = "0.4"
 selen = "0.14"
 ```
