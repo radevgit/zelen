@@ -1,6 +1,6 @@
 [package]
 name = "zelen"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 description = "Direct MiniZinc to Selen Solver"
 rust-version = "1.88"
@@ -11,6 +11,7 @@ homepage = "https://github.com/radevgit/zelen"
 repository = "https://github.com/radevgit/zelen"
 documentation = "https://docs.rs/zelen"
 readme = "README.md"
+exclude = ["zinc/", ".github/", "docs/"]
 
 [package.metadata.docs.rs]
 # docs.rs configuration
