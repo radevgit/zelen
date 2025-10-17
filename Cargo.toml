@@ -1,11 +1,11 @@
 [package]
 name = "zelen"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
-description = "Selen CSP solver parser for FlatZinc"
+description = "Direct MiniZinc to Selen Solver"
 rust-version = "1.88"
-categories = ["algorithms", "parser-implementations", "mathematics"]
-keywords = ["flatzinc", "minizinc", "constraint-solver", "csp", "parser"]
+categories = ["algorithms", "data-structures", "mathematics", "science"]
+keywords = ["minizinc", "constraint-solver", "csp", "solver", "puzzle"]
 license = "MIT"
 homepage = "https://github.com/radevgit/zelen"
 repository = "https://github.com/radevgit/zelen"
