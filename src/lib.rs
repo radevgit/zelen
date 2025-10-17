@@ -15,10 +15,12 @@ pub use compiler::Compiler;
 pub use error::{Error, Result};
 pub use lexer::Lexer;
 pub use parser::Parser;
-pub use translator::{Translator, TranslatedModel};
+pub use translator::{Translator, TranslatedModel, ObjectiveType};
 
-// Re-export Selen for convenience
+// Re-export commonly used Selen types for convenience
 pub use selen;
+// Re-export specific selen types to avoid conflicts
+pub use selen::prelude::{Model, Solution, VarId};
 
 /// Parse a MiniZinc model from source text into an AST
 pub fn parse(source: &str) -> Result<ast::Model> {
