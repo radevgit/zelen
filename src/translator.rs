@@ -173,9 +173,55 @@ impl Translator {
     pub fn translate_with_vars(ast: &ast::Model) -> Result<TranslatedModel> {
         let mut translator = Self::new();
 
-        // Process all items in order
+        // Two-pass approach to ensure simple constraints (e.g., var == const) are posted FIRST
+        // This helps Selen's propagators work with narrowed variable domains
+        
+        let debug = std::env::var("TRANSLATOR_DEBUG").is_ok();
+        
+        // Pass 1: Variable declarations
+        if debug {
+            eprintln!("TRANSLATOR_DEBUG: PASS 1 - Variable declarations");
+        }
         for item in &ast.items {
-            translator.translate_item(item)?;
+            if matches!(item, ast::Item::VarDecl(_)) {
+                translator.translate_item(item)?;
+            }
+        }
+        
+        // Pass 2: Simple equality constraints (var == const)
+        if debug {
+            eprintln!("TRANSLATOR_DEBUG: PASS 2 - Simple equality constraints");
+        }
+        for item in &ast.items {
+            if let ast::Item::Constraint(c) = item {
+                if Self::is_simple_equality_constraint(&c.expr) {
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG:   Posting simple constraint: {:?}", c.expr);
+                    }
+                    translator.translate_item(item)?;
+                }
+            }
+        }
+        
+        // Pass 3: All other constraints and solve statements
+        if debug {
+            eprintln!("TRANSLATOR_DEBUG: PASS 3 - Complex constraints and solve");
+        }
+        for item in &ast.items {
+            match item {
+                ast::Item::VarDecl(_) => {} // Already done in pass 1
+                ast::Item::Constraint(c) => {
+                    if !Self::is_simple_equality_constraint(&c.expr) {
+                        if debug {
+                            eprintln!("TRANSLATOR_DEBUG:   Posting complex constraint: {:?}", c.expr);
+                        }
+                        translator.translate_item(item)?;
+                    }
+                }
+                _ => {
+                    translator.translate_item(item)?;
+                }
+            }
         }
 
         Ok(TranslatedModel {
@@ -189,6 +235,44 @@ impl Translator {
             objective_type: translator.objective_type,
             objective_var: translator.objective_var,
         })
+    }
+
+    /// Check if a constraint is a simple equality (Var == Const or Const == Var)
+    fn is_simple_equality_constraint(expr: &ast::Expr) -> bool {
+        match &expr.kind {
+            ast::ExprKind::BinOp { op, left, right } => {
+                if !matches!(op, ast::BinOp::Eq) {
+                    return false;
+                }
+                
+                // Check if one side is an identifier and the other is a literal
+                let left_is_ident = matches!(left.kind, ast::ExprKind::Ident(_));
+                let left_is_literal = matches!(left.kind, 
+                    ast::ExprKind::IntLit(_) | 
+                    ast::ExprKind::BoolLit(_) | 
+                    ast::ExprKind::FloatLit(_)
+                );
+                
+                let right_is_ident = matches!(right.kind, ast::ExprKind::Ident(_));
+                let right_is_literal = matches!(right.kind,
+                    ast::ExprKind::IntLit(_) | 
+                    ast::ExprKind::BoolLit(_) | 
+                    ast::ExprKind::FloatLit(_)
+                );
+                
+                (left_is_ident && right_is_literal) || (left_is_literal && right_is_ident)
+            }
+            _ => false,
+        }
+    }
+
+    /// Extract a constant integer value from an expression if possible
+    /// Extract a constant integer value from an expression if possible
+    fn extract_const_value(expr: &ast::Expr) -> Option<i64> {
+        match &expr.kind {
+            ast::ExprKind::IntLit(i) => Some(*i),
+            _ => None,
+        }
     }
 
     fn translate_item(&mut self, item: &ast::Item) -> Result<()> {
@@ -266,6 +350,9 @@ impl Translator {
                     ast::BaseType::Int => {
                         let (min, max) = self.eval_int_domain(domain)?;
                         let var = self.model.int(min, max);
+                        if std::env::var("ZELEN_DEBUG").is_ok() {
+                            eprintln!("DEBUG: Created int var '{}': {:?} with range [{}, {}]", var_decl.name, var, min, max);
+                        }
                         self.context.add_int_var(var_decl.name.clone(), var);
                     }
                     ast::BaseType::Float => {
@@ -368,6 +455,9 @@ impl Translator {
             ast::ExprKind::Call { name, args } => {
                 self.translate_constraint_call(name, args)?;
             }
+            ast::ExprKind::GenCall { name, generators, body } => {
+                self.translate_constraint_gencall(name, generators, body)?;
+            }
             ast::ExprKind::BinOp { op, left, right } => {
                 self.translate_constraint_binop(*op, left, right)?;
             }
@@ -432,6 +522,228 @@ impl Translator {
         Ok(())
     }
 
+    fn translate_constraint_gencall(
+        &mut self,
+        name: &str,
+        generators: &[ast::Generator],
+        body: &ast::Expr,
+    ) -> Result<()> {
+        // For now, we only support "forall"
+        // Other generator calls like "exists" would have different semantics
+        if name != "forall" {
+            return Err(Error::unsupported_feature(
+                &format!("Generator call '{}'", name),
+                "forall only",
+                ast::Span::dummy(),
+            ));
+        }
+
+        // Expand forall(i in range)(constraint) into multiple individual constraints
+        // by iterating through the range and substituting values for the loop variable
+        self.expand_forall_constraint(generators, body)?;
+        Ok(())
+    }
+
+    /// Expand forall(i in range)(constraint) into individual constraints
+    fn expand_forall_constraint(&mut self, generators: &[ast::Generator], body: &ast::Expr) -> Result<()> {
+        // Handle single generator (most common case)
+        if generators.len() != 1 {
+            return Err(Error::unsupported_feature(
+                &format!("Multiple generators in forall"),
+                "Single generator only",
+                ast::Span::dummy(),
+            ));
+        }
+
+        let generator = &generators[0];
+        
+        // Get the loop variable name
+        if generator.names.len() != 1 {
+            return Err(Error::message(
+                "Generator must have exactly one variable",
+                ast::Span::dummy(),
+            ));
+        }
+        let loop_var = &generator.names[0];
+
+        // Parse the range expression to get (start, end)
+        let (range_start, range_end) = self.parse_range(&generator.expr)?;
+
+        // Iterate through the range and substitute loop variable with actual values
+        for i in range_start..=range_end {
+            // Create a new context for this iteration
+            let old_val = self.context.int_params.get(loop_var).copied();
+            
+            // Set the loop variable to the current iteration value
+            self.context.int_params.insert(loop_var.clone(), i);
+            
+            // Translate the constraint body with the loop variable substituted
+            let substituted_body = self.substitute_loop_var_in_expr(body, loop_var, i)?;
+            
+            // Create and translate the constraint
+            let constraint = ast::Constraint {
+                expr: substituted_body,
+                span: body.span,
+            };
+            self.translate_constraint(&constraint)?;
+            
+            // Restore the old value (or remove the parameter)
+            if let Some(old) = old_val {
+                self.context.int_params.insert(loop_var.clone(), old);
+            } else {
+                self.context.int_params.remove(loop_var);
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Parse a range expression like `1..n` to get (start, end)
+    fn parse_range(&self, expr: &ast::Expr) -> Result<(i32, i32)> {
+        match &expr.kind {
+            ast::ExprKind::BinOp { op: ast::BinOp::Range, left, right } => {
+                let start = self.eval_int_expr(left)?;
+                let end = self.eval_int_expr(right)?;
+                Ok((start, end))
+            }
+            _ => {
+                // Single value range
+                let val = self.eval_int_expr(expr)?;
+                Ok((val, val))
+            }
+        }
+    }
+
+    /// Expand forall with multiple generators (nested loops)
+    fn expand_forall_constraint_multi(&mut self, generators: &[ast::Generator], body: &ast::Expr) -> Result<()> {
+        if generators.is_empty() {
+            return Err(Error::message("No generators in forall", ast::Span::dummy()));
+        }
+
+        // For nested loops, we recursively expand each generator
+        self.expand_forall_generators(generators, 0, body)?;
+        Ok(())
+    }
+
+    /// Recursively expand nested forall generators
+    fn expand_forall_generators(&mut self, generators: &[ast::Generator], depth: usize, body: &ast::Expr) -> Result<()> {
+        if depth >= generators.len() {
+            // All generators processed - translate the body
+            let constraint = ast::Constraint {
+                expr: body.clone(),
+                span: body.span,
+            };
+            self.translate_constraint(&constraint)?;
+            return Ok(());
+        }
+
+        let generator = &generators[depth];
+        
+        if generator.names.len() != 1 {
+            return Err(Error::message(
+                "Generator must have exactly one variable",
+                ast::Span::dummy(),
+            ));
+        }
+        let loop_var = &generator.names[0];
+
+        let (range_start, range_end) = self.parse_range(&generator.expr)?;
+
+        // Iterate through this level's range
+        for i in range_start..=range_end {
+            let old_val = self.context.int_params.get(loop_var).copied();
+            self.context.int_params.insert(loop_var.clone(), i);
+            
+            // Substitute all remaining loop variables in the expression
+            let mut substituted = body.clone();
+            
+            // Substitute all loop variables from current depth onwards
+            for j in 0..=depth {
+                if j < generators.len() {
+                    let var_name = &generators[j].names[0];
+                    if let Some(var_val) = self.context.int_params.get(var_name) {
+                        substituted = self.substitute_loop_var_in_expr(&substituted, var_name, *var_val)?;
+                    }
+                }
+            }
+            
+            // Process next level or translate
+            self.expand_forall_generators(generators, depth + 1, &substituted)?;
+            
+            if let Some(old) = old_val {
+                self.context.int_params.insert(loop_var.clone(), old);
+            } else {
+                self.context.int_params.remove(loop_var);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Substitute a loop variable with a concrete value in an expression
+    fn substitute_loop_var_in_expr(&self, expr: &ast::Expr, var_name: &str, value: i32) -> Result<ast::Expr> {
+        let substituted_kind = match &expr.kind {
+            // If it's the loop variable itself, replace with a literal
+            ast::ExprKind::Ident(name) if name == var_name => {
+                ast::ExprKind::IntLit(value as i64)
+            }
+            // If it's another identifier, keep it as is
+            ast::ExprKind::Ident(_) => expr.kind.clone(),
+            
+            // For binary operations, recursively substitute both sides
+            ast::ExprKind::BinOp { op, left, right } => {
+                let left_sub = self.substitute_loop_var_in_expr(left, var_name, value)?;
+                let right_sub = self.substitute_loop_var_in_expr(right, var_name, value)?;
+                ast::ExprKind::BinOp {
+                    op: *op,
+                    left: Box::new(left_sub),
+                    right: Box::new(right_sub),
+                }
+            }
+            
+            // For unary operations, recursively substitute
+            ast::ExprKind::UnOp { op, expr: inner } => {
+                let inner_sub = self.substitute_loop_var_in_expr(inner, var_name, value)?;
+                ast::ExprKind::UnOp {
+                    op: *op,
+                    expr: Box::new(inner_sub),
+                }
+            }
+            
+            // For array access, substitute the index if needed
+            ast::ExprKind::ArrayAccess { array, index } => {
+                let index_sub = self.substitute_loop_var_in_expr(index, var_name, value)?;
+                ast::ExprKind::ArrayAccess {
+                    array: array.clone(),
+                    index: Box::new(index_sub),
+                }
+            }
+            
+            // For function calls, recursively substitute all arguments
+            ast::ExprKind::Call { name, args } => {
+                let args_sub = args.iter()
+                    .map(|arg| self.substitute_loop_var_in_expr(arg, var_name, value))
+                    .collect::<Result<Vec<_>>>()?;
+                ast::ExprKind::Call {
+                    name: name.clone(),
+                    args: args_sub,
+                }
+            }
+            
+            // For literals, keep them as is
+            ast::ExprKind::IntLit(_) | ast::ExprKind::BoolLit(_) | 
+            ast::ExprKind::FloatLit(_) => expr.kind.clone(),
+            
+            // Other expression types
+            other => other.clone(),
+        };
+        
+        Ok(ast::Expr {
+            kind: substituted_kind,
+            span: expr.span,
+        })
+    }
+
     fn translate_constraint_binop(
         &mut self,
         op: ast::BinOp,
@@ -480,30 +792,87 @@ impl Translator {
             // Comparison operators
             ast::BinOp::Lt | ast::BinOp::Le | ast::BinOp::Gt | 
             ast::BinOp::Ge | ast::BinOp::Eq | ast::BinOp::Ne => {
-                // Get the left and right variables/values
-                let left_var = self.get_var_or_value(left)?;
-                let right_var = self.get_var_or_value(right)?;
+                // CRITICAL FIX: Check if right side is a literal constant BEFORE calling get_var_or_value
+                // If it is, we should pass the raw integer directly to the constraint method,
+                // not create a new VarId. This prevents Selen's modulo propagator from being confused.
+                if let Some(const_val) = Self::extract_const_value(right) {
+                    let left_var = self.get_var_or_value(left)?;
+                    let const_i32 = const_val as i32;
+                    
+                    match op {
+                        ast::BinOp::Lt => {
+                            self.model.new(left_var.lt(const_i32));
+                        }
+                        ast::BinOp::Le => {
+                            self.model.new(left_var.le(const_i32));
+                        }
+                        ast::BinOp::Gt => {
+                            self.model.new(left_var.gt(const_i32));
+                        }
+                        ast::BinOp::Ge => {
+                            self.model.new(left_var.ge(const_i32));
+                        }
+                        ast::BinOp::Eq => {
+                            self.model.new(left_var.eq(const_i32));
+                        }
+                        ast::BinOp::Ne => {
+                            self.model.new(left_var.ne(const_i32));
+                        }
+                        _ => unreachable!(),
+                    }
+                } else if let Some(const_val) = Self::extract_const_value(left) {
+                    // Constant on left side
+                    let right_var = self.get_var_or_value(right)?;
+                    let const_i32 = const_val as i32;
+                    let const_var = self.model.int(const_i32, const_i32);
+                    
+                    match op {
+                        ast::BinOp::Lt => {
+                            self.model.new(const_var.lt(right_var));
+                        }
+                        ast::BinOp::Le => {
+                            self.model.new(const_var.le(right_var));
+                        }
+                        ast::BinOp::Gt => {
+                            self.model.new(const_var.gt(right_var));
+                        }
+                        ast::BinOp::Ge => {
+                            self.model.new(const_var.ge(right_var));
+                        }
+                        ast::BinOp::Eq => {
+                            self.model.new(const_var.eq(right_var));
+                        }
+                        ast::BinOp::Ne => {
+                            self.model.new(const_var.ne(right_var));
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    // Neither side is a constant literal - normal path
+                    let left_var = self.get_var_or_value(left)?;
+                    let right_var = self.get_var_or_value(right)?;
 
-                match op {
-                    ast::BinOp::Lt => {
-                        self.model.new(left_var.lt(right_var));
+                    match op {
+                        ast::BinOp::Lt => {
+                            self.model.new(left_var.lt(right_var));
+                        }
+                        ast::BinOp::Le => {
+                            self.model.new(left_var.le(right_var));
+                        }
+                        ast::BinOp::Gt => {
+                            self.model.new(left_var.gt(right_var));
+                        }
+                        ast::BinOp::Ge => {
+                            self.model.new(left_var.ge(right_var));
+                        }
+                        ast::BinOp::Eq => {
+                            self.model.new(left_var.eq(right_var));
+                        }
+                        ast::BinOp::Ne => {
+                            self.model.new(left_var.ne(right_var));
+                        }
+                        _ => unreachable!(),
                     }
-                    ast::BinOp::Le => {
-                        self.model.new(left_var.le(right_var));
-                    }
-                    ast::BinOp::Gt => {
-                        self.model.new(left_var.gt(right_var));
-                    }
-                    ast::BinOp::Ge => {
-                        self.model.new(left_var.ge(right_var));
-                    }
-                    ast::BinOp::Eq => {
-                        self.model.new(left_var.eq(right_var));
-                    }
-                    ast::BinOp::Ne => {
-                        self.model.new(left_var.ne(right_var));
-                    }
-                    _ => unreachable!(),
                 }
             }
             _ => {
@@ -637,35 +1006,57 @@ impl Translator {
 
     /// Get a VarId from an expression (either a variable reference or create a constant)
     fn get_var_or_value(&mut self, expr: &ast::Expr) -> Result<VarId> {
+        let debug = std::env::var("TRANSLATOR_DEBUG").is_ok();
         match &expr.kind {
             ast::ExprKind::Ident(name) => {
                 // Try integer variable
                 if let Some(var) = self.context.get_int_var(name) {
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> existing var {:?}", name, var);
+                    }
                     return Ok(var);
                 }
                 // Try boolean variable
                 if let Some(var) = self.context.get_bool_var(name) {
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> existing bool var {:?}", name, var);
+                    }
                     return Ok(var);
                 }
                 // Try float variable
                 if let Some(var) = self.context.get_float_var(name) {
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> existing float var {:?}", name, var);
+                    }
                     return Ok(var);
                 }
                 // Try integer parameter
                 if let Some(value) = self.context.get_int_param(name) {
                     // Create a constant variable
-                    return Ok(self.model.int(value, value));
+                    let const_var = self.model.int(value, value);
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> new constant {:?} (value={})", name, const_var, value);
+                    }
+                    return Ok(const_var);
                 }
                 // Try float parameter
                 if let Some(value) = self.context.get_float_param(name) {
                     // Create a constant variable
-                    return Ok(self.model.float(value, value));
+                    let const_var = self.model.float(value, value);
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> new constant {:?} (value={})", name, const_var, value);
+                    }
+                    return Ok(const_var);
                 }
                 // Try boolean parameter
                 if let Some(value) = self.context.get_bool_param(name) {
                     // Create a constant variable (0 or 1)
                     let val = if value { 1 } else { 0 };
-                    return Ok(self.model.int(val, val));
+                    let const_var = self.model.int(val, val);
+                    if debug {
+                        eprintln!("TRANSLATOR_DEBUG: get_var_or_value(Ident({})) -> new constant {:?} (value={})", name, const_var, val);
+                    }
+                    return Ok(const_var);
                 }
                 // Not found - give helpful error
                 Err(Error::message(
@@ -674,7 +1065,8 @@ impl Translator {
                 ))
             }
             ast::ExprKind::IntLit(i) => {
-                // Create a constant variable
+                // Don't create a variable - return the value as a special marker
+                // We'll handle this in translate_constraint_binop to avoid creating extra variables
                 Ok(self.model.int(*i as i32, *i as i32))
             }
             ast::ExprKind::FloatLit(f) => {
@@ -696,10 +1088,14 @@ impl Translator {
                     ast::BinOp::Mul => Ok(self.model.mul(left_var, right_var)),
                     ast::BinOp::Div | ast::BinOp::FDiv => Ok(self.model.div(left_var, right_var)),
                     ast::BinOp::Mod => {
-                        // Modulo: a mod b can be expressed as a - (a div b) * b
-                        let quotient = self.model.div(left_var, right_var);
-                        let product = self.model.mul(quotient, right_var);
-                        Ok(self.model.sub(left_var, product))
+                        if std::env::var("ZELEN_DEBUG").is_ok() {
+                            eprintln!("DEBUG: Creating modulo: {:?} mod {:?}", left_var, right_var);
+                        }
+                        let result = self.model.modulo(left_var, right_var);
+                        if std::env::var("ZELEN_DEBUG").is_ok() {
+                            eprintln!("DEBUG:   -> Modulo result VarId: {:?}", result);
+                        }
+                        Ok(result)
                     }
                     _ => Err(Error::unsupported_feature(
                         &format!("Binary operator {:?} in expressions", op),
@@ -911,7 +1307,7 @@ impl Translator {
                 let count_result = self.model.int(0, vars.len() as i32);
                 
                 // Call Selen's count_var constraint (supports both constant and variable values)
-                self.model.count_var(&vars, value, count_result);
+                self.model.count(&vars, value, count_result);
                 
                 Ok(count_result)
             }
@@ -1663,4 +2059,71 @@ mod tests {
             assert!(all_true, "Expected all flags to be true");
         }
     }
+
+    #[test]
+    fn test_modulo_operator() {
+        // Test that modulo operator can be evaluated with constants
+        let source = r#"
+            var 1..20: x;
+            var 0..4: remainder;
+            
+            % Direct constraint with constants: check if 13 mod 5 = 3
+            constraint 13 mod 5 == 3;
+            constraint x == 13;
+            constraint remainder == 3;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate modulo expression");
+    }
+
+    #[test]
+    fn test_modulo_with_constraint() {
+        // Test modulo with variable divisor (the problematic case)
+        let source = r#"
+            var 1..100: dividend;
+            var 1..10: divisor;
+            var 0..9: remainder;
+            
+            constraint remainder == dividend mod divisor;
+            constraint dividend == 47;
+            constraint divisor == 10;
+            
+            solve satisfy;
+        "#;
+        let ast = parse(source).unwrap();
+        
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate array with values");
+        
+        // Test that it solves correctly
+        let model_data = result.unwrap();
+        let sol = model_data.model.solve();
+        
+        if let Err(e) = sol {
+            eprintln!("FAILED TO SOLVE: {:?}", e);
+            eprintln!("This is the modulo with variable divisor issue!");
+            panic!("Model should solve but got: {:?}", e);
+        }
+        
+        let solution = sol.unwrap();
+        if let Some(dividend_var) = model_data.int_vars.get("dividend") {
+            let div_val = solution.get_int(*dividend_var);
+            assert_eq!(div_val, 47, "dividend should be 47");
+        }
+        
+        if let Some(divisor_var) = model_data.int_vars.get("divisor") {
+            let divisor_val = solution.get_int(*divisor_var);
+            assert_eq!(divisor_val, 10, "divisor should be 10");
+        }
+        
+        if let Some(remainder_var) = model_data.int_vars.get("remainder") {
+            let rem_val = solution.get_int(*remainder_var);
+            assert_eq!(rem_val, 7, "remainder should be 7 (47 mod 10 = 7)");
+        }
+    }
 }
+
