@@ -159,24 +159,58 @@ pub struct Translator {
     objective_var: Option<VarId>,
 }
 
-/// Result of translation containing the model and variable mappings
-/// Optimization objective type
+/// Optimization objective type for the solver
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectiveType {
+    /// Satisfaction problem - find any solution
     Satisfy,
+    /// Minimization problem - find solution with minimum objective value
     Minimize,
+    /// Maximization problem - find solution with maximum objective value
     Maximize,
 }
 
+/// Result of translating a MiniZinc model to a Selen model
+///
+/// This struct contains:
+/// - The Selen model ready to solve
+/// - Mappings from variable names to their VarIds
+/// - The objective type and variable (if any)
+///
+/// # Example
+///
+/// ```ignore
+/// use zelen::Translator;
+///
+/// let ast = zelen::parse("var 1..10: x; solve satisfy;")?;
+/// let model_data = Translator::translate_with_vars(&ast)?;
+///
+/// // Access variable information
+/// for (name, var_id) in &model_data.int_vars {
+///     println!("Variable: {}", name);
+/// }
+///
+/// // Solve the model
+/// let solution = model_data.model.solve()?;
+/// ```
 pub struct TranslatedModel {
+    /// The Selen constraint model ready to solve
     pub model: selen::model::Model,
+    /// Mapping from integer variable names to their VarIds
     pub int_vars: HashMap<String, VarId>,
+    /// Mapping from integer array variable names to their VarId vectors
     pub int_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Mapping from boolean variable names to their VarIds
     pub bool_vars: HashMap<String, VarId>,
+    /// Mapping from boolean array variable names to their VarId vectors
     pub bool_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Mapping from float variable names to their VarIds
     pub float_vars: HashMap<String, VarId>,
+    /// Mapping from float array variable names to their VarId vectors
     pub float_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Type of optimization goal (satisfy, minimize, or maximize)
     pub objective_type: ObjectiveType,
+    /// Variable ID of the objective (for minimize/maximize problems)
     pub objective_var: Option<VarId>,
 }
 
