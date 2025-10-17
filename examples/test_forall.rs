@@ -39,14 +39,14 @@ fn main() {
         Err(e) => println!("✗ TRANSLATION ERROR: {:?}\n", e),
     }
 
-    // Test 2: Forall with multiple generators (if supported)
-    println!("Test 2: Forall with inequality constraints\n");
+    // Test 2: Forall with multiple generators (nested loops)
+    println!("Test 2: Forall with multiple generators\n");
     let source2 = r#"
-        int: n = 4;
-        array[1..n] of var 1..10: queens;
+        int: n = 3;
+        array[1..n] of var 1..10: x;
         
         constraint forall(i in 1..n, j in i+1..n)(
-            abs(queens[i] - queens[j]) > abs(i - j)
+            x[i] < x[j]
         );
         
         solve satisfy;
@@ -61,11 +61,18 @@ fn main() {
                     match model_data.model.solve() {
                         Ok(sol) => {
                             println!("✓ SOLVED!");
-                            if let Some(arr) = model_data.int_var_arrays.get("queens") {
-                                println!("  queens array values:");
+                            if let Some(arr) = model_data.int_var_arrays.get("x") {
+                                println!("  x array values:");
                                 for (i, var_id) in arr.iter().enumerate() {
                                     let val = sol.get_int(*var_id);
-                                    println!("    queens[{}] = {}", i + 1, val);
+                                    println!("    x[{}] = {}", i + 1, val);
+                                }
+                                // Verify multi-generator constraints
+                                let vals: Vec<_> = arr.iter().map(|v| sol.get_int(*v)).collect();
+                                for i in 0..vals.len() {
+                                    for j in (i+1)..vals.len() {
+                                        assert!(vals[i] < vals[j], "Constraint x[{}] < x[{}] violated!", i+1, j+1);
+                                    }
                                 }
                             }
                             println!("  ✓ All constraints satisfied!\n");

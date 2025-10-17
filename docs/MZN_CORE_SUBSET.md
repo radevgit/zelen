@@ -28,11 +28,12 @@
 - **Forall aggregate**: `forall(bool_array)` returns true if all elements are true - **Phase 3**
 - **Modulo operator**: `x mod y` works with variables, constants, and expressions - **Phase 3**
 - **XOR operator**: `a xor b` for exclusive OR - **Phase 3**
+- **Forall loops (comprehensions)**: `forall(i in 1..n)(constraint)` expands to multiple constraints - **Phase 4**
+- **Nested forall loops**: `forall(i in 1..n, j in i+1..n)(constraint)` for complex constraint patterns - **Phase 4**
 - Direct execution and solution extraction
-- 48 unit tests passing, 10 working examples
+- 48 unit tests passing, 12 working examples
 
 ### ❌ What's Missing (Phase 4+)
-- Forall loops: `forall(i in 1..n) (...)` (comprehensions)
 - Set types and operations
 - Output formatting
 - String types and operations
@@ -48,9 +49,10 @@
 ✅ Count, exists, forall aggregates all working with variables and constants
 ✅ Modulo operator working with variables, constants, and expressions
 ✅ XOR operator implemented
+✅ Forall loops (comprehensions) with single and multiple generators
 ✅ Optimization working (minimize, maximize)
 ✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
-            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo, modulo_demo
+            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo, modulo_demo, test_forall
 ```
 
 ## Overview

@@ -540,22 +540,16 @@ impl Translator {
 
         // Expand forall(i in range)(constraint) into multiple individual constraints
         // by iterating through the range and substituting values for the loop variable
-        self.expand_forall_constraint(generators, body)?;
+        if generators.len() == 1 {
+            self.expand_forall_constraint(&generators[0], body)?;
+        } else {
+            self.expand_forall_constraint_multi(generators, body)?;
+        }
         Ok(())
     }
 
-    /// Expand forall(i in range)(constraint) into individual constraints
-    fn expand_forall_constraint(&mut self, generators: &[ast::Generator], body: &ast::Expr) -> Result<()> {
-        // Handle single generator (most common case)
-        if generators.len() != 1 {
-            return Err(Error::unsupported_feature(
-                &format!("Multiple generators in forall"),
-                "Single generator only",
-                ast::Span::dummy(),
-            ));
-        }
-
-        let generator = &generators[0];
+    /// Expand forall(i in range)(constraint) into individual constraints for a single generator
+    fn expand_forall_constraint(&mut self, generator: &ast::Generator, body: &ast::Expr) -> Result<()> {
         
         // Get the loop variable name
         if generator.names.len() != 1 {
