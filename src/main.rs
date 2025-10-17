@@ -261,7 +261,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_solution(&solution, &model_data.int_vars, &model_data.bool_vars,
                           &model_data.float_vars, &model_data.int_var_arrays,
                           &model_data.bool_var_arrays, &model_data.float_var_arrays,
-                          args.statistics && idx == solutions.len() - 1, elapsed)?;
+                          args.statistics && idx == solutions.len() - 1, solutions.len())?;
         }
     } else {
         if args.verbose {
@@ -287,7 +287,7 @@ fn print_solution(
     bool_var_arrays: &std::collections::HashMap<String, Vec<selen::prelude::VarId>>,
     float_var_arrays: &std::collections::HashMap<String, Vec<selen::prelude::VarId>>,
     print_stats: bool,
-    elapsed: std::time::Duration,
+    total_solutions: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Print integer variables
     for (name, var_id) in int_vars {
@@ -351,10 +351,29 @@ fn print_solution(
 
     // Print statistics if requested
     if print_stats {
-        println!(
-            "%%%mzn-stat: solveTime={:.3}",
-            elapsed.as_secs_f64()
-        );
+        println!("%%%mzn-stat: solutions={}", total_solutions);
+        println!("%%%mzn-stat: nodes={}", solution.stats.node_count);
+        println!("%%%mzn-stat: variables={}", solution.stats.variables);
+        println!("%%%mzn-stat: intVariables={}", solution.stats.int_variables);
+        println!("%%%mzn-stat: boolVariables={}", solution.stats.bool_variables);
+        println!("%%%mzn-stat: floatVariables={}", solution.stats.float_variables);
+        println!("%%%mzn-stat: propagators={}", solution.stats.propagators);
+        println!("%%%mzn-stat: propagations={}", solution.stats.propagation_count);
+        println!("%%%mzn-stat: constraints={}", solution.stats.constraint_count);
+        println!("%%%mzn-stat: objective={}", solution.stats.objective);
+        println!("%%%mzn-stat: objectiveBound={}", solution.stats.objective_bound);
+        println!("%%%mzn-stat: initTime={:.6}", solution.stats.init_time.as_secs_f64());
+        println!("%%%mzn-stat: solveTime={:.6}", solution.stats.solve_time.as_secs_f64());
+        println!("%%%mzn-stat: peakMem={:.2}", solution.stats.peak_memory_mb as f64);
+        
+        // LP solver stats if available
+        if solution.stats.lp_solver_used {
+            println!("%%%mzn-stat: lpSolverUsed=true");
+            println!("%%%mzn-stat: lpConstraintCount={}", solution.stats.lp_constraint_count);
+            println!("%%%mzn-stat: lpVariableCount={}", solution.stats.lp_variable_count);
+        }
+        
+        println!("%%%mzn-stat-end");
     }
 
     Ok(())
