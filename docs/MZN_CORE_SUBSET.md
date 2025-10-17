@@ -30,8 +30,9 @@
 - **XOR operator**: `a xor b` for exclusive OR - **Phase 3**
 - **Forall loops (comprehensions)**: `forall(i in 1..n)(constraint)` expands to multiple constraints - **Phase 4**
 - **Nested forall loops**: `forall(i in 1..n, j in i+1..n)(constraint)` for complex constraint patterns - **Phase 4**
+- **Array initialization expressions**: `array[1..5] of int: costs = [10, 20, 30, 40, 50]` - **Phase 4**
 - Direct execution and solution extraction
-- 48 unit tests passing, 12 working examples
+- 52 unit tests passing, 12 working examples
 
 ### ❌ What's Missing (Phase 4+)
 - Set types and operations
@@ -40,7 +41,7 @@
 
 ### 📊 Test Results
 ```
-✅ 48/48 unit tests passing (up from 46)
+✅ 52/52 unit tests passing (up from 48)
 ✅ Parser handles 6/7 examples (comprehensions Phase 4)
 ✅ Translator solves simple N-Queens (column constraints)
 ✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF, XOR)
@@ -50,6 +51,7 @@
 ✅ Modulo operator working with variables, constants, and expressions
 ✅ XOR operator implemented
 ✅ Forall loops (comprehensions) with single and multiple generators
+✅ Array initialization expressions (parameter arrays with literal values)
 ✅ Optimization working (minimize, maximize)
 ✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
             bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo, modulo_demo, test_forall
@@ -148,8 +150,8 @@ array[bool] of var 0..10: choices;
 - ✅ `array[1..n] of var 0.0..1.0` → `model.floats(n, 0.0, 1.0)`
 - ✅ Index set size calculation from expressions
 - ✅ Constrained element domains for all types
-- ❌ Parameter arrays (not yet implemented)
-- ❌ Array initialization expressions
+- ✅ Parameter arrays with initialization - **Phase 4**
+- ❌ Parameter arrays without initializer (Phase 2)
 
 #### NOT Supported in Phase 1
 

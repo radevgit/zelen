@@ -28,6 +28,12 @@ struct TranslatorContext {
     float_params: HashMap<String, f64>,
     /// Bool parameters
     bool_params: HashMap<String, bool>,
+    /// Parameter arrays (integer constants)
+    int_param_arrays: HashMap<String, Vec<i32>>,
+    /// Float parameter arrays
+    float_param_arrays: HashMap<String, Vec<f64>>,
+    /// Bool parameter arrays
+    bool_param_arrays: HashMap<String, Vec<bool>>,
 }
 
 impl TranslatorContext {
@@ -42,6 +48,9 @@ impl TranslatorContext {
             int_params: HashMap::new(),
             float_params: HashMap::new(),
             bool_params: HashMap::new(),
+            int_param_arrays: HashMap::new(),
+            float_param_arrays: HashMap::new(),
+            bool_param_arrays: HashMap::new(),
         }
     }
 
@@ -115,6 +124,30 @@ impl TranslatorContext {
 
     fn get_float_var_array(&self, name: &str) -> Option<&Vec<VarId>> {
         self.float_var_arrays.get(name)
+    }
+
+    fn add_int_param_array(&mut self, name: String, values: Vec<i32>) {
+        self.int_param_arrays.insert(name, values);
+    }
+
+    fn get_int_param_array(&self, name: &str) -> Option<&Vec<i32>> {
+        self.int_param_arrays.get(name)
+    }
+
+    fn add_float_param_array(&mut self, name: String, values: Vec<f64>) {
+        self.float_param_arrays.insert(name, values);
+    }
+
+    fn get_float_param_array(&self, name: &str) -> Option<&Vec<f64>> {
+        self.float_param_arrays.get(name)
+    }
+
+    fn add_bool_param_array(&mut self, name: String, values: Vec<bool>) {
+        self.bool_param_arrays.insert(name, values);
+    }
+
+    fn get_bool_param_array(&self, name: &str) -> Option<&Vec<bool>> {
+        self.bool_param_arrays.get(name)
     }
 }
 
@@ -439,12 +472,67 @@ impl Translator {
                 _ => unreachable!(),
             }
         } else {
-            // Parameter array - not yet supported
-            return Err(Error::unsupported_feature(
-                "Parameter arrays",
-                "Phase 1",
-                ast::Span::dummy(),
-            ));
+            // Parameter array - extract values from initializer
+            if let Some(init) = init_expr {
+                // Extract array literal from initializer
+                match &init.kind {
+                    ast::ExprKind::ArrayLit(elements) => {
+                        // Verify size matches
+                        if elements.len() != size {
+                            return Err(Error::message(
+                                &format!("Array size mismatch: declared {}, but got {}", size, elements.len()),
+                                init.span,
+                            ));
+                        }
+                        
+                        // Determine element type and extract values
+                        match element_type {
+                            ast::TypeInst::Constrained { base_type, .. } | ast::TypeInst::Basic { base_type, .. } => {
+                                match base_type {
+                                    ast::BaseType::Int => {
+                                        let mut values = Vec::with_capacity(size);
+                                        for elem in elements.iter() {
+                                            let val = self.eval_int_expr(elem)?;
+                                            values.push(val);
+                                        }
+                                        self.context.add_int_param_array(name.to_string(), values);
+                                    }
+                                    ast::BaseType::Float => {
+                                        let mut values = Vec::with_capacity(size);
+                                        for elem in elements.iter() {
+                                            let val = self.eval_float_expr(elem)?;
+                                            values.push(val);
+                                        }
+                                        self.context.add_float_param_array(name.to_string(), values);
+                                    }
+                                    ast::BaseType::Bool => {
+                                        let mut values = Vec::with_capacity(size);
+                                        for elem in elements.iter() {
+                                            let val = self.eval_bool_expr(elem)?;
+                                            values.push(val);
+                                        }
+                                        self.context.add_bool_param_array(name.to_string(), values);
+                                    }
+                                }
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    _ => {
+                        return Err(Error::message(
+                            "Array initialization must be an array literal [...]",
+                            init.span,
+                        ));
+                    }
+                }
+            } else {
+                // Parameter array without initializer - not supported
+                return Err(Error::unsupported_feature(
+                    "Parameter arrays without initializer",
+                    "Phase 2",
+                    ast::Span::dummy(),
+                ));
+            }
         }
 
         Ok(())
@@ -1116,10 +1204,23 @@ impl Translator {
                     // Arrays in MiniZinc are 1-indexed, convert to 0-indexed
                     let array_index = (index_val - 1) as usize;
                     
-                    // Try to find the array
+                    // Try to find the array (first check variable arrays, then parameter arrays)
                     if let Some(arr) = self.context.get_int_var_array(array_name) {
                         if array_index < arr.len() {
                             return Ok(arr[array_index]);
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
+                    }
+                    if let Some(arr) = self.context.get_int_param_array(array_name) {
+                        if array_index < arr.len() {
+                            // Create a constant VarId for this parameter value
+                            let val = arr[array_index];
+                            return Ok(self.model.int(val, val));
                         } else {
                             return Err(Error::message(
                                 &format!("Array index {} out of bounds (array size: {})",
@@ -1139,9 +1240,35 @@ impl Translator {
                             ));
                         }
                     }
+                    if let Some(arr) = self.context.get_bool_param_array(array_name) {
+                        if array_index < arr.len() {
+                            // Create a boolean VarId for this parameter value
+                            let val = if arr[array_index] { 1 } else { 0 };
+                            return Ok(self.model.int(val, val));
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
+                    }
                     if let Some(arr) = self.context.get_float_var_array(array_name) {
                         if array_index < arr.len() {
                             return Ok(arr[array_index]);
+                        } else {
+                            return Err(Error::message(
+                                &format!("Array index {} out of bounds (array size: {})",
+                                    index_val, arr.len()),
+                                index.span,
+                            ));
+                        }
+                    }
+                    if let Some(arr) = self.context.get_float_param_array(array_name) {
+                        if array_index < arr.len() {
+                            // Create a constant VarId for this parameter value
+                            let val = arr[array_index];
+                            return Ok(self.model.float(val, val));
                         } else {
                             return Err(Error::message(
                                 &format!("Array index {} out of bounds (array size: {})",
@@ -2117,6 +2244,126 @@ mod tests {
         if let Some(remainder_var) = model_data.int_vars.get("remainder") {
             let rem_val = solution.get_int(*remainder_var);
             assert_eq!(rem_val, 7, "remainder should be 7 (47 mod 10 = 7)");
+        }
+    }
+
+    #[test]
+    fn test_array_initialization_int() {
+        // Test integer parameter array initialization
+        let source = r#"
+            array[1..3] of int: limits = [5, 10, 15];
+            array[1..3] of var 1..10: x;
+            
+            constraint x[1] <= limits[1];
+            constraint x[2] <= limits[2];
+            constraint x[3] <= limits[3];
+            
+            solve satisfy;
+        "#;
+
+        let ast = parse(source).unwrap();
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate array initialization");
+        
+        let model_data = result.unwrap();
+        let solution = model_data.model.solve();
+        assert!(solution.is_ok(), "Failed to solve with parameter array");
+        
+        let sol = solution.unwrap();
+        if let Some(arr) = model_data.int_var_arrays.get("x") {
+            assert_eq!(arr.len(), 3, "Array should have 3 elements");
+            let x1 = sol.get_int(arr[0]);
+            let x2 = sol.get_int(arr[1]);
+            let x3 = sol.get_int(arr[2]);
+            
+            // Verify constraints were applied
+            assert!(x1 <= 5, "x[1] should be <= 5");
+            assert!(x2 <= 10, "x[2] should be <= 10");
+            assert!(x3 <= 15, "x[3] should be <= 15");
+        }
+    }
+
+    #[test]
+    fn test_array_initialization_float() {
+        // Test float parameter array initialization
+        let source = r#"
+            array[1..2] of float: thresholds = [1.5, 2.5];
+            array[1..2] of var 0.0..5.0: values;
+            
+            constraint values[1] <= thresholds[1];
+            constraint values[2] <= thresholds[2];
+            
+            solve satisfy;
+        "#;
+
+        let ast = parse(source).unwrap();
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate float array initialization");
+        
+        let model_data = result.unwrap();
+        let solution = model_data.model.solve();
+        assert!(solution.is_ok(), "Failed to solve with float parameter array");
+        
+        let sol = solution.unwrap();
+        if let Some(arr) = model_data.float_var_arrays.get("values") {
+            assert_eq!(arr.len(), 2, "Array should have 2 elements");
+            let v1 = sol.get_float(arr[0]);
+            let v2 = sol.get_float(arr[1]);
+            
+            // Verify constraints were applied
+            assert!(v1 <= 1.6, "values[1] should be <= 1.5 (with small tolerance)");
+            assert!(v2 <= 2.6, "values[2] should be <= 2.5 (with small tolerance)");
+        }
+    }
+
+    #[test]
+    fn test_array_initialization_bool() {
+        // Test bool parameter array initialization
+        let source = r#"
+            array[1..2] of bool: flags = [true, false];
+            array[1..2] of var bool: enabled;
+            
+            solve satisfy;
+        "#;
+
+        let ast = parse(source).unwrap();
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate bool array initialization");
+        
+        let model_data = result.unwrap();
+        let solution = model_data.model.solve();
+        assert!(solution.is_ok(), "Failed to solve with bool parameter array");
+    }
+
+    #[test]
+    fn test_array_initialization_in_arithmetic() {
+        // Test using parameter array elements in arithmetic expressions
+        let source = r#"
+            array[1..2] of int: costs = [10, 20];
+            array[1..2] of var 0..1: select;
+            
+            constraint costs[1] * select[1] + costs[2] * select[2] <= 25;
+            
+            solve maximize select[1] + select[2];
+        "#;
+
+        let ast = parse(source).unwrap();
+        let result = Translator::translate_with_vars(&ast);
+        assert!(result.is_ok(), "Failed to translate array in arithmetic");
+        
+        let model_data = result.unwrap();
+        let solution = model_data.model.solve();
+        assert!(solution.is_ok(), "Failed to solve with array in arithmetic");
+        
+        let sol = solution.unwrap();
+        if let Some(arr) = model_data.int_var_arrays.get("select") {
+            assert_eq!(arr.len(), 2, "Array should have 2 elements");
+            let s1 = sol.get_int(arr[0]);
+            let s2 = sol.get_int(arr[1]);
+            
+            // Verify constraint: 10*s1 + 20*s2 <= 25
+            let total_cost = 10 * s1 + 20 * s2;
+            assert!(total_cost <= 25, "Cost constraint should be satisfied");
         }
     }
 }
