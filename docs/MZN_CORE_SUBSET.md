@@ -15,19 +15,21 @@
 - Variable arrays (int, bool, float): `array[1..n] of var 1..n: x`
 - Parameters (int, bool, float): `int: n = 5;`, `bool: enabled = true;`, `float: pi = 3.14159;`
 - Binary constraints: `x < y`, `x + y <= 10`
-- Arithmetic in constraints: `+`, `-`, `*`, `/`, `mod`
-- **Boolean logical operations**: `/\` (AND), `\/` (OR), `not` (NOT), `->` (implies), `<->` (iff)
+- Arithmetic in constraints: `+`, `-`, `*`, `/`, `mod` (all working with variables and constants)
+- **Boolean logical operations**: `/\` (AND), `\/` (OR), `not` (NOT), `->` (implies), `<->` (iff), `xor` (XOR)
 - **Float arithmetic in constraints**: All arithmetic operators work with floats
 - **Array indexing in constraints**: `x[i] == value`, `x[1] < 5` (constant indices)
 - **Array aggregates**: `sum(arr)`, `min(arr)`, `max(arr)`, `product(arr)`
 - **Optimization**: `solve minimize expr;`, `solve maximize expr;`
 - Global constraint: `alldifferent(queens)`
-- **Element constraint with variable indices**: `x[i] == value` (where i is a variable) - **NEW Phase 3**
-- **Count aggregate**: `count(array, value) == n` - **NEW Phase 3**
-- **Exists aggregate**: `exists(bool_array)` returns true if any element is true - **NEW Phase 3**
-- **Forall aggregate**: `forall(bool_array)` returns true if all elements are true - **NEW Phase 3**
+- **Element constraint with variable indices**: `x[i] == value` (where i is a variable) - **Phase 3**
+- **Count aggregate**: `count(array, value) == n` (works with variables and constants) - **Phase 3**
+- **Exists aggregate**: `exists(bool_array)` returns true if any element is true - **Phase 3**
+- **Forall aggregate**: `forall(bool_array)` returns true if all elements are true - **Phase 3**
+- **Modulo operator**: `x mod y` works with variables, constants, and expressions - **Phase 3**
+- **XOR operator**: `a xor b` for exclusive OR - **Phase 3**
 - Direct execution and solution extraction
-- 46 unit tests passing, 9 working examples
+- 48 unit tests passing, 10 working examples
 
 ### ❌ What's Missing (Phase 4+)
 - Forall loops: `forall(i in 1..n) (...)` (comprehensions)
@@ -37,16 +39,18 @@
 
 ### 📊 Test Results
 ```
-✅ 46/46 unit tests passing (up from 42)
+✅ 48/48 unit tests passing (up from 46)
 ✅ Parser handles 6/7 examples (comprehensions Phase 4)
 ✅ Translator solves simple N-Queens (column constraints)
-✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF)
+✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF, XOR)
 ✅ Array aggregates working (sum, min, max, product)
 ✅ Element constraint working with variable indices and 1-based arrays
-✅ Count, exists, forall aggregates all working
+✅ Count, exists, forall aggregates all working with variables and constants
+✅ Modulo operator working with variables, constants, and expressions
+✅ XOR operator implemented
 ✅ Optimization working (minimize, maximize)
 ✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
-            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo
+            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo, modulo_demo
 ```
 
 ## Overview
@@ -181,7 +185,7 @@ x != y             % ✅ model.new(x.ne(y))
 - ✅ Integer literals as constants
 - ✅ Variable references
 - ✅ Parameter references (evaluated at translation time)
-- ❌ `x mod y` (not yet implemented)
+- ✅ `x mod y` - Works with variables, constants, and expressions (Phase 3)
 - ❌ Arithmetic expressions in variable declarations (e.g., `var x+1..y`)
 
 #### Boolean Expressions ✅
@@ -192,7 +196,7 @@ a \/ b           % ✅ OR - model.bool_or(&[a, b])
 a -> b           % ✅ Implication - model.implies(a, b)
 a <-> b          % ✅ Bi-implication (iff) - double implication
 not a            % ✅ Negation - model.bool_not(a)
-a xor b          % ❌ Exclusive OR (not yet)
+a xor b          % ✅ Exclusive OR - XOR operation (Phase 3)
 ```
 
 **Status:**
@@ -200,7 +204,7 @@ a xor b          % ❌ Exclusive OR (not yet)
 - ✅ Boolean operations return VarId (can be used in expressions)
 - ✅ Works in constraints: `constraint raining -> umbrella;`
 - ✅ Compound expressions: `constraint (a /\ b) \/ c;`
-- ❌ XOR - Phase 3
+- ✅ XOR - Phase 3 COMPLETE
 
 #### Array Operations ✅
 ```minizinc
@@ -510,7 +514,7 @@ constraint count(arr, value) == n;           % ✅ Constant value
 constraint count(arr, some_var) >= 2;        % ✅ Variable value
 constraint count(flags, 1) == num_true;      % ✅ Count true flags
 
-% Implementation: Uses Selen's m.count_var(&array, value, result)
+% Implementation: Uses Selen's m.count() - works with both variables and constants
 ```
 
 ### 3.3 Exists Aggregate ✅
@@ -591,9 +595,11 @@ constraint occurs(maybe_value) -> (deopt(maybe_value) > 5);
 | `x - y` | `model.sub(x, y)` | ✅ | Subtraction |
 | `x * y` | `model.mul(x, y)` | ✅ | Multiplication |
 | `x / y` | `model.div(x, y)` | ✅ | Division |
+| `x mod y` | `model.modulo(x, y)` | ✅ | Modulo (Phase 3, works with variables) |
+| `a xor b` | XOR operation | ✅ | Exclusive OR (Phase 3) |
 | `alldifferent(x)` | `model.alldiff(&x)` | ✅ | Global constraint |
 | `arr[i] == value` | `model.element(&arr, i, value)` | ✅ | Element (Phase 3) |
-| `count(arr, val)` | `model.count_var(&arr, val, result)` | ✅ | Count aggregate (Phase 3) |
+| `count(arr, val)` | `model.count()` | ✅ | Count aggregate (Phase 3, variables & constants) |
 | `exists(arr)` | `model.bool_or(&arr)` | ✅ | Exists aggregate (Phase 3) |
 | `forall(arr)` | `model.bool_and(&arr)` | ✅ | Forall aggregate (Phase 3) |
 | `sum(x) <= c` | `model.sum(&x)` | ✅ | Linear constraint (Phase 2) |
