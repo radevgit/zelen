@@ -453,8 +453,8 @@ impl Translator {
                 }
             }
 
-            ast::TypeInst::Array { index_set, element_type } => {
-                self.translate_array_decl(&var_decl.name, index_set, element_type, &var_decl.expr)?;
+            ast::TypeInst::Array { index_sets, element_type } => {
+                self.translate_array_decl(&var_decl.name, index_sets, element_type, &var_decl.expr)?;
             }
         }
 
@@ -464,7 +464,7 @@ impl Translator {
     fn translate_array_decl(
         &mut self,
         name: &str,
-        index_set: &ast::Expr,
+        index_sets: &[ast::Expr],
         element_type: &ast::TypeInst,
         init_expr: &Option<ast::Expr>,
     ) -> Result<()> {
@@ -481,8 +481,12 @@ impl Translator {
             }
         };
 
-        // Get array size
-        let size = self.eval_index_set_size(index_set)?;
+        // Get total array size (product of all dimensions for multi-dimensional arrays)
+        let mut size = 1usize;
+        for index_set in index_sets {
+            let dim_size = self.eval_index_set_size(index_set)?;
+            size = size.saturating_mul(dim_size);
+        }
 
         if is_var {
             // Decision variable array - determine the type
@@ -844,12 +848,14 @@ impl Translator {
                 }
             }
             
-            // For array access, substitute the index if needed
-            ast::ExprKind::ArrayAccess { array, index } => {
-                let index_sub = self.substitute_loop_var_in_expr(index, var_name, value)?;
+            // For array access, substitute the indices if needed
+            ast::ExprKind::ArrayAccess { array, indices } => {
+                let indices_sub = indices.iter()
+                    .map(|idx| self.substitute_loop_var_in_expr(idx, var_name, value))
+                    .collect::<Result<Vec<_>>>()?;
                 ast::ExprKind::ArrayAccess {
                     array: array.clone(),
-                    index: Box::new(index_sub),
+                    indices: indices_sub,
                 }
             }
             
@@ -1238,7 +1244,7 @@ impl Translator {
                     )),
                 }
             }
-            ast::ExprKind::ArrayAccess { array, index } => {
+            ast::ExprKind::ArrayAccess { array, indices } => {
                 // Get the array name
                 let array_name = match &array.kind {
                     ast::ExprKind::Ident(name) => name,
@@ -1249,6 +1255,18 @@ impl Translator {
                         ));
                     }
                 };
+                
+                // For now, handle 1D arrays only (multi-dimensional arrays are flattened)
+                // TODO: Add support for multi-dimensional indexing with automatic flattening
+                if indices.len() != 1 {
+                    return Err(Error::unsupported_feature(
+                        "Multi-dimensional array access",
+                        "Phase 2",
+                        expr.span,
+                    ));
+                }
+                
+                let index = &indices[0];
                 
                 // Try to evaluate the index expression to a constant first
                 if let Ok(index_val) = self.eval_int_expr(index) {

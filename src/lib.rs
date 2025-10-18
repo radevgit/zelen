@@ -63,14 +63,12 @@
 //! - Satisfy, minimize, and maximize objectives
 
 pub mod ast;
-pub mod compiler;
 pub mod error;
 pub mod lexer;
 pub mod parser;
 pub mod translator;
 
 pub use ast::*;
-pub use compiler::Compiler;
 pub use error::{Error, Result};
 pub use lexer::Lexer;
 pub use parser::Parser;
@@ -332,14 +330,6 @@ pub fn solve_with_config(
 pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, selen::core::SolverError>> {
     let model = build_model(source)?;
     Ok(model.solve())
-}
-
-/// Compile a MiniZinc model to Rust code (for code generation)
-#[deprecated(note = "Use build_model() to create Selen models directly")]
-pub fn compile(source: &str) -> Result<String> {
-    let model = parse(source)?;
-    let mut compiler = Compiler::new();
-    compiler.compile(&model)
 }
 
 #[cfg(test)]

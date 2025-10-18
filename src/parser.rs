@@ -173,42 +173,57 @@ impl Parser {
         }
     }
     
-    /// Parse array type: `array[1..n] of var int` or `array[int] of int`
+    /// Parse array type: `array[1..n] of var int`, `array[1..n, 1..m] of var int`, etc.
     fn parse_array_type_inst(&mut self) -> Result<TypeInst> {
         self.expect(TokenKind::Array)?;
         self.expect(TokenKind::LBracket)?;
         
-        // Handle implicit index sets: array[int], array[bool], array[float]
-        let index_set = match &self.current_token.kind {
-            TokenKind::Int => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Int),
-                    span,
+        // Parse one or more index sets (comma-separated for multi-dimensional)
+        let mut index_sets = vec![];
+        
+        loop {
+            // Handle implicit index sets: array[int], array[bool], array[float]
+            let index_set = match &self.current_token.kind {
+                TokenKind::Int => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Int),
+                        span,
+                    }
                 }
-            }
-            TokenKind::Bool => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Bool),
-                    span,
+                TokenKind::Bool => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Bool),
+                        span,
+                    }
                 }
-            }
-            TokenKind::Float => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Float),
-                    span,
+                TokenKind::Float => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Float),
+                        span,
+                    }
                 }
+                _ => {
+                    // Regular index set expression: array[1..n] or array[1..n, 1..m]
+                    self.parse_expr()?
+                }
+            };
+            
+            index_sets.push(index_set);
+            
+            // Check for comma (multi-dimensional) or bracket (end)
+            if self.current_token.kind == TokenKind::Comma {
+                self.advance()?;
+                continue;
+            } else {
+                break;
             }
-            _ => {
-                // Regular index set expression: array[1..n]
-                self.parse_expr()?
-            }
-        };
+        }
         
         self.expect(TokenKind::RBracket)?;
         self.expect(TokenKind::Of)?;
@@ -216,7 +231,7 @@ impl Parser {
         let element_type = Box::new(self.parse_type_inst()?);
         
         Ok(TypeInst::Array {
-            index_set,
+            index_sets,
             element_type,
         })
     }
@@ -413,9 +428,20 @@ impl Parser {
         loop {
             match &self.current_token.kind {
                 TokenKind::LBracket => {
-                    // Array access
+                    // Array access (possibly multi-dimensional: grid[i,j] or grid[i,j,k])
                     self.advance()?;
-                    let index = self.parse_expr()?;
+                    let mut indices = vec![];
+                    
+                    loop {
+                        indices.push(self.parse_expr()?);
+                        if self.current_token.kind == TokenKind::Comma {
+                            self.advance()?;
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                    
                     self.expect(TokenKind::RBracket)?;
                     
                     let end = self.current_token.span.end;
@@ -423,7 +449,7 @@ impl Parser {
                         span: Span::new(expr.span.start, end),
                         kind: ExprKind::ArrayAccess {
                             array: Box::new(expr),
-                            index: Box::new(index),
+                            indices,
                         },
                     };
                 }
@@ -791,8 +817,9 @@ mod tests {
         
         // Verify it's an array with implicit index set
         if let Item::VarDecl(var_decl) = &model.items[0] {
-            if let TypeInst::Array { index_set, .. } = &var_decl.type_inst {
-                assert!(matches!(index_set.kind, ExprKind::ImplicitIndexSet(BaseType::Int)));
+            if let TypeInst::Array { index_sets, .. } = &var_decl.type_inst {
+                assert_eq!(index_sets.len(), 1);
+                assert!(matches!(index_sets[0].kind, ExprKind::ImplicitIndexSet(BaseType::Int)));
             } else {
                 panic!("Expected array type");
             }

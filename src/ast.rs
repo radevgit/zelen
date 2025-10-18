@@ -46,9 +46,10 @@ pub enum TypeInst {
         base_type: BaseType,
         domain: Expr,
     },
-    /// Array type: array[1..n] of var int
+    /// Array type: array[1..n] of var int or array[1..n, 1..m] of var int
+    /// For multi-dimensional arrays: index_sets contains one entry per dimension
     Array {
-        index_set: Expr,
+        index_sets: Vec<Expr>,
         element_type: Box<TypeInst>,
     },
 }
@@ -116,10 +117,11 @@ pub enum ExprKind {
     /// Range: `1..n`, `0..10`
     Range(Box<Expr>, Box<Expr>),
     
-    /// Array access: `x[i]`, `grid[i+1]`
+    /// Array access: `x[i]`, `grid[i+1]`, `cube[i,j,k]`
+    /// For multi-dimensional arrays, indices contains one entry per dimension
     ArrayAccess {
         array: Box<Expr>,
-        index: Box<Expr>,
+        indices: Vec<Expr>,
     },
     
     /// Binary operation: `x + y`, `a /\ b`
