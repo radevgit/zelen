@@ -2,7 +2,7 @@
 //!
 //! Translates a parsed MiniZinc AST into Selen Model objects for execution.
 
-use crate::ast;
+use crate::ast::{self, Span};
 use crate::error::{Error, Result};
 use selen::prelude::*;
 use std::collections::HashMap;
@@ -282,6 +282,7 @@ pub struct Translator {
     context: TranslatorContext,
     objective_type: ObjectiveType,
     objective_var: Option<VarId>,
+    output_items: Vec<ast::Expr>,
 }
 
 /// Optimization objective type for the solver
@@ -337,6 +338,223 @@ pub struct TranslatedModel {
     pub objective_type: ObjectiveType,
     /// Variable ID of the objective (for minimize/maximize problems)
     pub objective_var: Option<VarId>,
+    /// Output expressions from output items (stored as AST for formatting during solution)
+    pub output_items: Vec<ast::Expr>,
+}
+
+impl TranslatedModel {
+    /// Format output using the output items from the MiniZinc model
+    /// Returns the formatted output string if output items exist
+    pub fn format_output(&self, solution: &selen::prelude::Solution) -> Option<String> {
+        if self.output_items.is_empty() {
+            return None;
+        }
+
+        let mut result = String::new();
+        
+        for output_expr in &self.output_items {
+            match self.format_expr(output_expr, solution) {
+                Ok(formatted) => result.push_str(&formatted),
+                Err(_) => {
+                    // If any expression fails, skip the entire output
+                    return None;
+                }
+            }
+        }
+
+        Some(result)
+    }
+
+    /// Format a single expression
+    fn format_expr(&self, expr: &ast::Expr, solution: &selen::prelude::Solution) -> Result<String> {
+        match &expr.kind {
+            ast::ExprKind::StringLit(s) => {
+                // Process escape sequences
+                Ok(self.process_escape_sequences(s))
+            }
+            ast::ExprKind::ArrayLit(elements) => {
+                // String concatenation: ["a", "b", show(x)]
+                let mut result = String::new();
+                for elem in elements {
+                    result.push_str(&self.format_expr(elem, solution)?);
+                }
+                Ok(result)
+            }
+            ast::ExprKind::Call { name, args } if name == "show" => {
+                // show() function - convert variable/array to string representation
+                if args.is_empty() {
+                    return Err(Error::message("show() requires at least one argument", expr.span));
+                }
+                self.format_show_arg(&args[0], solution)
+            }
+            ast::ExprKind::Ident(var_name) => {
+                // Direct variable reference - get its value
+                self.format_variable(var_name, solution)
+            }
+            _ => {
+                // For other expressions, try to evaluate them
+                Err(Error::message(
+                    &format!("Unsupported expression in output: {:?}", expr.kind),
+                    expr.span,
+                ))
+            }
+        }
+    }
+
+    /// Format the argument to show() function
+    fn format_show_arg(&self, arg: &ast::Expr, solution: &selen::prelude::Solution) -> Result<String> {
+        match &arg.kind {
+            ast::ExprKind::Ident(var_name) => {
+                // show(x) or show(array)
+                self.format_variable(var_name, solution)
+            }
+            ast::ExprKind::ArrayAccess { array, indices } => {
+                // show(array[i]) - access and format specific element
+                if let ast::ExprKind::Ident(array_name) = &array.kind {
+                    self.format_array_access(array_name, indices, solution)
+                } else {
+                    Err(Error::message(
+                        "Complex array access in show() not supported",
+                        arg.span,
+                    ))
+                }
+            }
+            _ => Err(Error::message(
+                &format!("Unsupported argument to show(): {:?}", arg.kind),
+                arg.span,
+            )),
+        }
+    }
+
+    /// Format a variable or array value
+    fn format_variable(&self, var_name: &str, solution: &selen::prelude::Solution) -> Result<String> {
+        // Try integer variable
+        if let Some(&var_id) = self.int_vars.get(var_name) {
+            return Ok(solution.get_int(var_id).to_string());
+        }
+
+        // Try boolean variable (format as 0/1)
+        if let Some(&var_id) = self.bool_vars.get(var_name) {
+            let value = solution.get_int(var_id);
+            return Ok(value.to_string());
+        }
+
+        // Try float variable
+        if let Some(&var_id) = self.float_vars.get(var_name) {
+            return Ok(solution.get_float(var_id).to_string());
+        }
+
+        // Try integer array
+        if let Some(var_ids) = self.int_var_arrays.get(var_name) {
+            return Ok(self.format_array(var_ids, solution, false, false));
+        }
+
+        // Try boolean array (format as 0/1)
+        if let Some(var_ids) = self.bool_var_arrays.get(var_name) {
+            return Ok(self.format_array(var_ids, solution, true, false));
+        }
+
+        // Try float array
+        if let Some(var_ids) = self.float_var_arrays.get(var_name) {
+            return Ok(self.format_array(var_ids, solution, false, true));
+        }
+
+        Err(Error::message(
+            &format!("Undefined variable in output: '{}'", var_name),
+            Span::new(0, 0),
+        ))
+    }
+
+    /// Format an array value
+    fn format_array(
+        &self,
+        var_ids: &[VarId],
+        solution: &selen::prelude::Solution,
+        _is_bool: bool,
+        is_float: bool,
+    ) -> String {
+        let mut result = String::from("[");
+        
+        for (i, var_id) in var_ids.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            
+            if is_float {
+                result.push_str(&solution.get_float(*var_id).to_string());
+            } else {
+                result.push_str(&solution.get_int(*var_id).to_string());
+            }
+        }
+        
+        result.push(']');
+        result
+    }
+
+    /// Format array element access
+    fn format_array_access(
+        &self,
+        array_name: &str,
+        indices: &[ast::Expr],
+        solution: &selen::prelude::Solution,
+    ) -> Result<String> {
+        // For now, only support constant indices for element access
+        let mut const_indices = Vec::new();
+        
+        for idx_expr in indices {
+            // Try to evaluate index to a constant
+            if let ast::ExprKind::IntLit(val) = idx_expr.kind {
+                const_indices.push((val - 1) as usize); // Convert from 1-based to 0-based
+            } else if let ast::ExprKind::Ident(_) = idx_expr.kind {
+                // Variable index - not supported in output formatting yet
+                return Err(Error::message(
+                    "Variable indices in array access within output not yet supported",
+                    idx_expr.span,
+                ));
+            } else {
+                return Err(Error::message(
+                    "Complex indices in array access within output not supported",
+                    idx_expr.span,
+                ));
+            }
+        }
+
+        // Flatten the indices to get the element position
+        // Try integer array first
+        if let Some(var_ids) = self.int_var_arrays.get(array_name) {
+            if const_indices.len() == 1 && const_indices[0] < var_ids.len() {
+                return Ok(solution.get_int(var_ids[const_indices[0]]).to_string());
+            }
+        }
+
+        // Try boolean array
+        if let Some(var_ids) = self.bool_var_arrays.get(array_name) {
+            if const_indices.len() == 1 && const_indices[0] < var_ids.len() {
+                return Ok(solution.get_int(var_ids[const_indices[0]]).to_string());
+            }
+        }
+
+        // Try float array
+        if let Some(var_ids) = self.float_var_arrays.get(array_name) {
+            if const_indices.len() == 1 && const_indices[0] < var_ids.len() {
+                return Ok(solution.get_float(var_ids[const_indices[0]]).to_string());
+            }
+        }
+
+        Err(Error::message(
+            &format!("Invalid array access: '{}' with indices: {:?}", array_name, const_indices),
+            Span::new(0, 0),
+        ))
+    }
+
+    /// Process escape sequences in strings
+    fn process_escape_sequences(&self, s: &str) -> String {
+        s.replace("\\n", "\n")
+            .replace("\\t", "\t")
+            .replace("\\r", "\r")
+            .replace("\\\\", "\\")
+            .replace("\\\"", "\"")
+    }
 }
 
 impl Translator {
@@ -346,6 +564,7 @@ impl Translator {
             context: TranslatorContext::new(),
             objective_type: ObjectiveType::Satisfy,
             objective_var: None,
+            output_items: Vec::new(),
         }
     }
 
@@ -369,6 +588,7 @@ impl Translator {
             context: TranslatorContext::new(),
             objective_type: ObjectiveType::Satisfy,
             objective_var: None,
+            output_items: Vec::new(),
         };
 
         // Process all items in order
@@ -444,6 +664,7 @@ impl Translator {
             float_var_arrays: translator.context.float_var_arrays,
             objective_type: translator.objective_type,
             objective_var: translator.objective_var,
+            output_items: translator.output_items,
         })
     }
 
@@ -490,8 +711,9 @@ impl Translator {
             ast::Item::VarDecl(var_decl) => self.translate_var_decl(var_decl),
             ast::Item::Constraint(constraint) => self.translate_constraint(constraint),
             ast::Item::Solve(solve) => self.translate_solve(solve),
-            ast::Item::Output(_) => {
-                // Skip output items for now
+            ast::Item::Output(output) => {
+                // Store output items for later formatting
+                self.output_items.push(output.expr.clone());
                 Ok(())
             }
         }

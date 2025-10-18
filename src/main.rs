@@ -258,10 +258,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if idx > 0 {
                 println!("----------");
             }
-            print_solution(&solution, &model_data.int_vars, &model_data.bool_vars,
-                          &model_data.float_vars, &model_data.int_var_arrays,
-                          &model_data.bool_var_arrays, &model_data.float_var_arrays,
-                          args.statistics && idx == solutions.len() - 1, solutions.len())?;
+            print_solution(solution, &model_data, args.statistics && idx == solutions.len() - 1, solutions.len())?;
         }
     } else {
         if args.verbose {
@@ -280,74 +277,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// Print solution in MiniZinc/FlatZinc output format
 fn print_solution(
     solution: &selen::prelude::Solution,
-    int_vars: &std::collections::HashMap<String, selen::prelude::VarId>,
-    bool_vars: &std::collections::HashMap<String, selen::prelude::VarId>,
-    float_vars: &std::collections::HashMap<String, selen::prelude::VarId>,
-    int_var_arrays: &std::collections::HashMap<String, Vec<selen::prelude::VarId>>,
-    bool_var_arrays: &std::collections::HashMap<String, Vec<selen::prelude::VarId>>,
-    float_var_arrays: &std::collections::HashMap<String, Vec<selen::prelude::VarId>>,
+    model_data: &zelen::TranslatedModel,
     print_stats: bool,
     total_solutions: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Print integer variables
-    for (name, var_id) in int_vars {
-        let value = solution.get_int(*var_id);
-        println!("{} = {};", name, value);
-    }
-
-    // Print boolean variables (as 0/1 in MiniZinc format)
-    for (name, var_id) in bool_vars {
-        let value = solution.get_int(*var_id);
-        println!("{} = {};", name, value);
-    }
-
-    // Print float variables
-    for (name, var_id) in float_vars {
-        let value = solution.get_float(*var_id);
-        println!("{} = {};", name, value);
-    }
-
-    // Print integer arrays
-    for (name, var_ids) in int_var_arrays {
-        print!("{} = [", name);
-        for (i, var_id) in var_ids.iter().enumerate() {
-            if i > 0 {
-                print!(", ");
-            }
+    // Try to use output formatting from the model first
+    if let Some(formatted_output) = model_data.format_output(solution) {
+        print!("{}", formatted_output);
+    } else {
+        // Fall back to default variable printing
+        // Print integer variables
+        for (name, var_id) in &model_data.int_vars {
             let value = solution.get_int(*var_id);
-            print!("{}", value);
+            println!("{} = {};", name, value);
         }
-        println!("];");
-    }
 
-    // Print boolean arrays (as 0/1)
-    for (name, var_ids) in bool_var_arrays {
-        print!("{} = [", name);
-        for (i, var_id) in var_ids.iter().enumerate() {
-            if i > 0 {
-                print!(", ");
-            }
+        // Print boolean variables (as 0/1 in MiniZinc format)
+        for (name, var_id) in &model_data.bool_vars {
             let value = solution.get_int(*var_id);
-            print!("{}", value);
+            println!("{} = {};", name, value);
         }
-        println!("];");
-    }
 
-    // Print float arrays
-    for (name, var_ids) in float_var_arrays {
-        print!("{} = [", name);
-        for (i, var_id) in var_ids.iter().enumerate() {
-            if i > 0 {
-                print!(", ");
-            }
+        // Print float variables
+        for (name, var_id) in &model_data.float_vars {
             let value = solution.get_float(*var_id);
-            print!("{}", value);
+            println!("{} = {};", name, value);
         }
-        println!("];");
-    }
 
-    // Print solution separator
-    println!("----------");
+        // Print integer arrays
+        for (name, var_ids) in &model_data.int_var_arrays {
+            print!("{} = [", name);
+            for (i, var_id) in var_ids.iter().enumerate() {
+                if i > 0 {
+                    print!(", ");
+                }
+                let value = solution.get_int(*var_id);
+                print!("{}", value);
+            }
+            println!("];");
+        }
+
+        // Print boolean arrays (as 0/1)
+        for (name, var_ids) in &model_data.bool_var_arrays {
+            print!("{} = [", name);
+            for (i, var_id) in var_ids.iter().enumerate() {
+                if i > 0 {
+                    print!(", ");
+                }
+                let value = solution.get_int(*var_id);
+                print!("{}", value);
+            }
+            println!("];");
+        }
+
+        // Print float arrays
+        for (name, var_ids) in &model_data.float_var_arrays {
+            print!("{} = [", name);
+            for (i, var_id) in var_ids.iter().enumerate() {
+                if i > 0 {
+                    print!(", ");
+                }
+                let value = solution.get_float(*var_id);
+                print!("{}", value);
+            }
+            println!("];");
+        }
+
+        // Print solution separator
+        println!("----------");
+    }
 
     // Print statistics if requested
     if print_stats {

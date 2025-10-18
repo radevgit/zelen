@@ -10,4 +10,8 @@ mod test_3d_arrays;
 #[path = "../tests_all/test_variable_indexing.rs"]
 mod test_variable_indexing;
 
+#[path = "../tests_all/test_output_formatting.rs"]
+mod test_output_formatting;
+
+
 
