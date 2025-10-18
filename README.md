@@ -61,8 +61,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-zelen = "0.4"
-selen = "0.14"
+zelen = "0.5"
+selen = "0.15"
 ```
 
 ## Usage
