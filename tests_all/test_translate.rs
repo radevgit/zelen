@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // Test: Use translate() instead of translate_with_vars()
 
 use zelen::parse;

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Test forall loops (comprehensions) in constraints
 use zelen::{parse, translator::Translator};
 

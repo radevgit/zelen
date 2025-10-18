@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Final verification: Translator modulo now works!
 use zelen::{parse, translator::Translator};
 

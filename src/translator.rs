@@ -7,6 +7,67 @@ use crate::error::{Error, Result};
 use selen::prelude::*;
 use std::collections::HashMap;
 
+/// Metadata for multi-dimensional arrays to support flattening
+#[derive(Debug, Clone)]
+struct ArrayMetadata {
+    /// Dimensions of the array (e.g., [3, 4] for a 3x4 2D array)
+    dimensions: Vec<usize>,
+}
+
+impl ArrayMetadata {
+    /// Create metadata for a 1D array
+    fn new_1d(size: usize) -> Self {
+        Self {
+            dimensions: vec![size],
+        }
+    }
+
+    /// Create metadata for a multi-dimensional array
+    fn new(dimensions: Vec<usize>) -> Self {
+        Self { dimensions }
+    }
+
+    /// Total number of elements
+    fn total_size(&self) -> usize {
+        self.dimensions.iter().product()
+    }
+
+    /// Flatten multi-dimensional indices to a single 1D index
+    /// indices should be 0-based, and we return the 0-based flattened index
+    fn flatten_indices(&self, indices: &[usize]) -> Result<usize> {
+        if indices.len() != self.dimensions.len() {
+            return Err(Error::message(
+                &format!(
+                    "Index dimension mismatch: expected {}, got {}",
+                    self.dimensions.len(),
+                    indices.len()
+                ),
+                ast::Span::dummy(),
+            ));
+        }
+
+        let mut flat_index = 0;
+        let mut multiplier = 1;
+
+        // Process dimensions from right to left (least significant first)
+        for i in (0..self.dimensions.len()).rev() {
+            if indices[i] >= self.dimensions[i] {
+                return Err(Error::message(
+                    &format!(
+                        "Array index {} out of bounds for dimension {} (size: {})",
+                        indices[i], i, self.dimensions[i]
+                    ),
+                    ast::Span::dummy(),
+                ));
+            }
+            flat_index += indices[i] * multiplier;
+            multiplier *= self.dimensions[i];
+        }
+
+        Ok(flat_index)
+    }
+}
+
 /// Context for tracking variables during translation
 #[derive(Debug)]
 struct TranslatorContext {
@@ -34,6 +95,8 @@ struct TranslatorContext {
     float_param_arrays: HashMap<String, Vec<f64>>,
     /// Bool parameter arrays
     bool_param_arrays: HashMap<String, Vec<bool>>,
+    /// Metadata for multi-dimensional arrays (name -> dimensions)
+    array_metadata: HashMap<String, ArrayMetadata>,
 }
 
 impl TranslatorContext {
@@ -51,6 +114,7 @@ impl TranslatorContext {
             int_param_arrays: HashMap::new(),
             float_param_arrays: HashMap::new(),
             bool_param_arrays: HashMap::new(),
+            array_metadata: HashMap::new(),
         }
     }
 
@@ -483,10 +547,17 @@ impl Translator {
 
         // Get total array size (product of all dimensions for multi-dimensional arrays)
         let mut size = 1usize;
+        let mut dimensions = Vec::new();
         for index_set in index_sets {
             let dim_size = self.eval_index_set_size(index_set)?;
+            dimensions.push(dim_size);
             size = size.saturating_mul(dim_size);
         }
+
+        // Store array metadata for later index flattening
+        self.context
+            .array_metadata
+            .insert(name.to_string(), ArrayMetadata::new(dimensions));
 
         if is_var {
             // Decision variable array - determine the type
@@ -1256,17 +1327,73 @@ impl Translator {
                     }
                 };
                 
-                // For now, handle 1D arrays only (multi-dimensional arrays are flattened)
-                // TODO: Add support for multi-dimensional indexing with automatic flattening
-                if indices.len() != 1 {
-                    return Err(Error::unsupported_feature(
-                        "Multi-dimensional array access",
-                        "Phase 2",
-                        expr.span,
-                    ));
-                }
+                // Handle both 1D and multi-dimensional array access
+                // Multi-dimensional indices will be flattened to 1D
                 
-                let index = &indices[0];
+                // Get array metadata for multi-dimensional flattening
+                let metadata = self.context.array_metadata.get(array_name).cloned();
+                
+                // Flatten multi-dimensional indices to a single index
+                let flat_index = if indices.len() == 1 {
+                    // 1D array - use index as-is
+                    indices[0].clone()
+                } else {
+                    // Multi-dimensional array - flatten indices
+                    if let Some(metadata) = &metadata {
+                        if metadata.dimensions.len() != indices.len() {
+                            return Err(Error::message(
+                                &format!(
+                                    "Array index dimension mismatch: expected {}, got {}",
+                                    metadata.dimensions.len(),
+                                    indices.len()
+                                ),
+                                expr.span,
+                            ));
+                        }
+                        
+                        // Try to evaluate all indices to constants first
+                        let mut const_indices = Vec::new();
+                        let mut all_const = true;
+                        
+                        for idx in indices.iter() {
+                            match self.eval_int_expr(idx) {
+                                Ok(val) => {
+                                    // Convert from 1-based (MiniZinc) to 0-based for flattening
+                                    const_indices.push((val - 1) as usize);
+                                }
+                                Err(_) => {
+                                    all_const = false;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if all_const {
+                            // All indices are constants - compute flattened index at compile time
+                            let flat_idx = metadata.flatten_indices(&const_indices)?;
+                            let flat_idx_expr = ast::Expr {
+                                kind: ast::ExprKind::IntLit((flat_idx as i64) + 1), // MiniZinc is 1-indexed
+                                span: expr.span,
+                            };
+                            flat_idx_expr
+                        } else {
+                            // Variable indices - need to compute flattening at runtime
+                            // For now, return an error for runtime multi-dimensional indexing
+                            return Err(Error::unsupported_feature(
+                                "Variable multi-dimensional array access",
+                                "Phase 3",
+                                expr.span,
+                            ));
+                        }
+                    } else {
+                        return Err(Error::message(
+                            &format!("Array metadata not found for: '{}'", array_name),
+                            array.span,
+                        ));
+                    }
+                };
+                
+                let index = &flat_index;
                 
                 // Try to evaluate the index expression to a constant first
                 if let Ok(index_val) = self.eval_int_expr(index) {
