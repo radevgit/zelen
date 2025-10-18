@@ -73,16 +73,28 @@ impl ArrayMetadata {
 struct TranslatorContext {
     /// Map from MiniZinc variable names to Selen VarIds (integers)
     int_vars: HashMap<String, VarId>,
-    /// Map from MiniZinc variable names to Selen VarId arrays
+    /// Map from MiniZinc variable names to Selen VarId arrays (1D)
     int_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Map from MiniZinc variable names to Selen 2D VarId arrays
+    int_var_arrays_2d: HashMap<String, Vec<Vec<VarId>>>,
+    /// Map from MiniZinc variable names to Selen 3D VarId arrays
+    int_var_arrays_3d: HashMap<String, Vec<Vec<Vec<VarId>>>>,
     /// Map from MiniZinc variable names to Selen VarIds (booleans)
     bool_vars: HashMap<String, VarId>,
     /// Map from MiniZinc variable names to Selen VarId arrays (booleans)
     bool_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Map from MiniZinc variable names to Selen 2D boolean VarId arrays
+    bool_var_arrays_2d: HashMap<String, Vec<Vec<VarId>>>,
+    /// Map from MiniZinc variable names to Selen 3D boolean VarId arrays
+    bool_var_arrays_3d: HashMap<String, Vec<Vec<Vec<VarId>>>>,
     /// Map from MiniZinc variable names to Selen VarIds (floats)
     float_vars: HashMap<String, VarId>,
     /// Map from MiniZinc variable names to Selen VarId arrays (floats)
     float_var_arrays: HashMap<String, Vec<VarId>>,
+    /// Map from MiniZinc variable names to Selen 2D float VarId arrays
+    float_var_arrays_2d: HashMap<String, Vec<Vec<VarId>>>,
+    /// Map from MiniZinc variable names to Selen 3D float VarId arrays
+    float_var_arrays_3d: HashMap<String, Vec<Vec<Vec<VarId>>>>,
     /// Parameter values (for compile-time constants)
     int_params: HashMap<String, i32>,
     /// Float parameters
@@ -104,10 +116,16 @@ impl TranslatorContext {
         Self {
             int_vars: HashMap::new(),
             int_var_arrays: HashMap::new(),
+            int_var_arrays_2d: HashMap::new(),
+            int_var_arrays_3d: HashMap::new(),
             bool_vars: HashMap::new(),
             bool_var_arrays: HashMap::new(),
+            bool_var_arrays_2d: HashMap::new(),
+            bool_var_arrays_3d: HashMap::new(),
             float_vars: HashMap::new(),
             float_var_arrays: HashMap::new(),
+            float_var_arrays_2d: HashMap::new(),
+            float_var_arrays_3d: HashMap::new(),
             int_params: HashMap::new(),
             float_params: HashMap::new(),
             bool_params: HashMap::new(),
@@ -188,6 +206,56 @@ impl TranslatorContext {
 
     fn get_float_var_array(&self, name: &str) -> Option<&Vec<VarId>> {
         self.float_var_arrays.get(name)
+    }
+
+    // 2D array methods
+    fn add_int_var_array_2d(&mut self, name: String, vars: Vec<Vec<VarId>>) {
+        self.int_var_arrays_2d.insert(name, vars);
+    }
+
+    fn get_int_var_array_2d(&self, name: &str) -> Option<&Vec<Vec<VarId>>> {
+        self.int_var_arrays_2d.get(name)
+    }
+
+    fn add_bool_var_array_2d(&mut self, name: String, vars: Vec<Vec<VarId>>) {
+        self.bool_var_arrays_2d.insert(name, vars);
+    }
+
+    fn get_bool_var_array_2d(&self, name: &str) -> Option<&Vec<Vec<VarId>>> {
+        self.bool_var_arrays_2d.get(name)
+    }
+
+    fn add_float_var_array_2d(&mut self, name: String, vars: Vec<Vec<VarId>>) {
+        self.float_var_arrays_2d.insert(name, vars);
+    }
+
+    fn get_float_var_array_2d(&self, name: &str) -> Option<&Vec<Vec<VarId>>> {
+        self.float_var_arrays_2d.get(name)
+    }
+
+    // 3D array methods
+    fn add_int_var_array_3d(&mut self, name: String, vars: Vec<Vec<Vec<VarId>>>) {
+        self.int_var_arrays_3d.insert(name, vars);
+    }
+
+    fn get_int_var_array_3d(&self, name: &str) -> Option<&Vec<Vec<Vec<VarId>>>> {
+        self.int_var_arrays_3d.get(name)
+    }
+
+    fn add_bool_var_array_3d(&mut self, name: String, vars: Vec<Vec<Vec<VarId>>>) {
+        self.bool_var_arrays_3d.insert(name, vars);
+    }
+
+    fn get_bool_var_array_3d(&self, name: &str) -> Option<&Vec<Vec<Vec<VarId>>>> {
+        self.bool_var_arrays_3d.get(name)
+    }
+
+    fn add_float_var_array_3d(&mut self, name: String, vars: Vec<Vec<Vec<VarId>>>) {
+        self.float_var_arrays_3d.insert(name, vars);
+    }
+
+    fn get_float_var_array_3d(&self, name: &str) -> Option<&Vec<Vec<Vec<VarId>>>> {
+        self.float_var_arrays_3d.get(name)
     }
 
     fn add_int_param_array(&mut self, name: String, values: Vec<i32>) {
@@ -525,6 +593,33 @@ impl Translator {
         Ok(())
     }
 
+    /// Flatten a 2D array to 1D with pre-allocated capacity
+    #[inline]
+    fn flatten_2d(arr_2d: &[Vec<VarId>]) -> Vec<VarId> {
+        let rows = arr_2d.len();
+        let cols = if rows > 0 { arr_2d[0].len() } else { 0 };
+        let mut result = Vec::with_capacity(rows * cols);
+        for row in arr_2d {
+            result.extend_from_slice(row);
+        }
+        result
+    }
+
+    /// Flatten a 3D array to 1D with pre-allocated capacity
+    #[inline]
+    fn flatten_3d(arr_3d: &[Vec<Vec<VarId>>]) -> Vec<VarId> {
+        let depth = arr_3d.len();
+        let rows = if depth > 0 { arr_3d[0].len() } else { 0 };
+        let cols = if rows > 0 { arr_3d[0][0].len() } else { 0 };
+        let mut result = Vec::with_capacity(depth * rows * cols);
+        for layer in arr_3d {
+            for row in layer {
+                result.extend_from_slice(row);
+            }
+        }
+        result
+    }
+
     fn translate_array_decl(
         &mut self,
         name: &str,
@@ -557,7 +652,7 @@ impl Translator {
         // Store array metadata for later index flattening
         self.context
             .array_metadata
-            .insert(name.to_string(), ArrayMetadata::new(dimensions));
+            .insert(name.to_string(), ArrayMetadata::new(dimensions.clone()));
 
         if is_var {
             // Decision variable array - determine the type
@@ -566,33 +661,109 @@ impl Translator {
                     match base_type {
                         ast::BaseType::Int => {
                             let (min, max) = self.eval_int_domain(domain)?;
-                            let vars = self.model.ints(size, min, max);
-                            self.context.add_int_var_array(name.to_string(), vars);
+                            // Use native 2D/3D arrays when applicable
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.ints_2d(dimensions[0], dimensions[1], min, max);
+                                // Also flatten for backward compatibility with constraints
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_int_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.ints_3d(dimensions[0], dimensions[1], dimensions[2], min, max);
+                                // Also flatten for backward compatibility with constraints
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_int_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else {
+                                // 1D or higher - use flat arrays
+                                let vars = self.model.ints(size, min, max);
+                                self.context.add_int_var_array(name.to_string(), vars);
+                            }
                         }
                         ast::BaseType::Float => {
                             let (min, max) = self.eval_float_domain(domain)?;
-                            let vars = self.model.floats(size, min, max);
-                            self.context.add_float_var_array(name.to_string(), vars);
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.floats_2d(dimensions[0], dimensions[1], min, max);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_float_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_float_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.floats_3d(dimensions[0], dimensions[1], dimensions[2], min, max);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_float_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_float_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.floats(size, min, max);
+                                self.context.add_float_var_array(name.to_string(), vars);
+                            }
                         }
                         ast::BaseType::Bool => {
-                            let vars = self.model.bools(size);
-                            self.context.add_bool_var_array(name.to_string(), vars);
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.bools_2d(dimensions[0], dimensions[1]);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_bool_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_bool_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.bools_3d(dimensions[0], dimensions[1], dimensions[2]);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_bool_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_bool_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.bools(size);
+                                self.context.add_bool_var_array(name.to_string(), vars);
+                            }
                         }
                     }
                 }
                 ast::TypeInst::Basic { base_type, .. } => {
                     match base_type {
                         ast::BaseType::Int => {
-                            let vars = self.model.ints(size, i32::MIN, i32::MAX);
-                            self.context.add_int_var_array(name.to_string(), vars);
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.ints_2d(dimensions[0], dimensions[1], i32::MIN, i32::MAX);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_int_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.ints_3d(dimensions[0], dimensions[1], dimensions[2], i32::MIN, i32::MAX);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_int_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.ints(size, i32::MIN, i32::MAX);
+                                self.context.add_int_var_array(name.to_string(), vars);
+                            }
                         }
                         ast::BaseType::Float => {
-                            let vars = self.model.floats(size, f64::MIN, f64::MAX);
-                            self.context.add_float_var_array(name.to_string(), vars);
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.floats_2d(dimensions[0], dimensions[1], f64::MIN, f64::MAX);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_float_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_float_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.floats_3d(dimensions[0], dimensions[1], dimensions[2], f64::MIN, f64::MAX);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_float_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_float_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.floats(size, f64::MIN, f64::MAX);
+                                self.context.add_float_var_array(name.to_string(), vars);
+                            }
                         }
                         ast::BaseType::Bool => {
-                            let vars = self.model.bools(size);
-                            self.context.add_bool_var_array(name.to_string(), vars);
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.bools_2d(dimensions[0], dimensions[1]);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_bool_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_bool_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.bools_3d(dimensions[0], dimensions[1], dimensions[2]);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_bool_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_bool_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.bools(size);
+                                self.context.add_bool_var_array(name.to_string(), vars);
+                            }
                         }
                     }
                 }
@@ -1327,19 +1498,10 @@ impl Translator {
                     }
                 };
                 
-                // Handle both 1D and multi-dimensional array access
-                // Multi-dimensional indices will be flattened to 1D
-                
-                // Get array metadata for multi-dimensional flattening
-                let metadata = self.context.array_metadata.get(array_name).cloned();
-                
-                // Flatten multi-dimensional indices to a single index
-                let flat_index = if indices.len() == 1 {
-                    // 1D array - use index as-is
-                    indices[0].clone()
-                } else {
-                    // Multi-dimensional array - flatten indices
-                    if let Some(metadata) = &metadata {
+                // Try to handle as multi-dimensional if multiple indices
+                if indices.len() > 1 {
+                    // Multi-dimensional array access - use native 2D/3D element constraints
+                    if let Some(metadata) = self.context.array_metadata.get(array_name) {
                         if metadata.dimensions.len() != indices.len() {
                             return Err(Error::message(
                                 &format!(
@@ -1351,6 +1513,86 @@ impl Translator {
                             ));
                         }
                         
+                        // For 2D arrays, use element_2d
+                        if indices.len() == 2 {
+                            // Check for 2D arrays and get early
+                            let arr_2d_int = self.context.get_int_var_array_2d(array_name).cloned();
+                            let arr_2d_bool = if arr_2d_int.is_none() {
+                                self.context.get_bool_var_array_2d(array_name).cloned()
+                            } else {
+                                None
+                            };
+                            let arr_2d_float = if arr_2d_int.is_none() && arr_2d_bool.is_none() {
+                                self.context.get_float_var_array_2d(array_name).cloned()
+                            } else {
+                                None
+                            };
+                            
+                            if let Some(arr_2d) = arr_2d_int {
+                                let row_idx = self.get_var_or_value(&indices[0])?;
+                                let col_idx = self.get_var_or_value(&indices[1])?;
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element_2d(&arr_2d, row_idx, col_idx, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr_2d) = arr_2d_bool {
+                                let row_idx = self.get_var_or_value(&indices[0])?;
+                                let col_idx = self.get_var_or_value(&indices[1])?;
+                                let result = self.model.bool();
+                                self.model.element_2d(&arr_2d, row_idx, col_idx, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr_2d) = arr_2d_float {
+                                let row_idx = self.get_var_or_value(&indices[0])?;
+                                let col_idx = self.get_var_or_value(&indices[1])?;
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element_2d(&arr_2d, row_idx, col_idx, result);
+                                return Ok(result);
+                            }
+                        }
+                        
+                        // For 3D arrays, use element_3d
+                        if indices.len() == 3 {
+                            // Check for 3D arrays and clone early
+                            let arr_3d_int = self.context.get_int_var_array_3d(array_name).cloned();
+                            let arr_3d_bool = if arr_3d_int.is_none() {
+                                self.context.get_bool_var_array_3d(array_name).cloned()
+                            } else {
+                                None
+                            };
+                            let arr_3d_float = if arr_3d_int.is_none() && arr_3d_bool.is_none() {
+                                self.context.get_float_var_array_3d(array_name).cloned()
+                            } else {
+                                None
+                            };
+                            
+                            if let Some(arr_3d) = arr_3d_int {
+                                let d_idx = self.get_var_or_value(&indices[0])?;
+                                let r_idx = self.get_var_or_value(&indices[1])?;
+                                let c_idx = self.get_var_or_value(&indices[2])?;
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element_3d(&arr_3d, d_idx, r_idx, c_idx, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr_3d) = arr_3d_bool {
+                                let d_idx = self.get_var_or_value(&indices[0])?;
+                                let r_idx = self.get_var_or_value(&indices[1])?;
+                                let c_idx = self.get_var_or_value(&indices[2])?;
+                                let result = self.model.bool();
+                                self.model.element_3d(&arr_3d, d_idx, r_idx, c_idx, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr_3d) = arr_3d_float {
+                                let d_idx = self.get_var_or_value(&indices[0])?;
+                                let r_idx = self.get_var_or_value(&indices[1])?;
+                                let c_idx = self.get_var_or_value(&indices[2])?;
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element_3d(&arr_3d, d_idx, r_idx, c_idx, result);
+                                return Ok(result);
+                            }
+                        }
+                        
+                        // For higher dimensions or fallback, use flattening
                         // Try to evaluate all indices to constants first
                         let mut const_indices = Vec::new();
                         let mut all_const = true;
@@ -1375,14 +1617,161 @@ impl Translator {
                                 kind: ast::ExprKind::IntLit((flat_idx as i64) + 1), // MiniZinc is 1-indexed
                                 span: expr.span,
                             };
-                            flat_idx_expr
+                            
+                            // Now continue with single-index access using the flattened index
+                            let flat_index = flat_idx_expr;
+                            
+                            // Try to evaluate the flattened index expression to a constant
+                            if let Ok(index_val) = self.eval_int_expr(&flat_index) {
+                                // Constant index - direct array access
+                                let array_index = (index_val - 1) as usize;
+                                
+                                // Try to find the array
+                                if let Some(arr) = self.context.get_int_var_array(array_name) {
+                                    if array_index < arr.len() {
+                                        return Ok(arr[array_index]);
+                                    }
+                                }
+                                if let Some(arr) = self.context.get_int_param_array(array_name) {
+                                    if array_index < arr.len() {
+                                        let val = arr[array_index];
+                                        return Ok(self.model.int(val, val));
+                                    }
+                                }
+                                if let Some(arr) = self.context.get_bool_var_array(array_name) {
+                                    if array_index < arr.len() {
+                                        return Ok(arr[array_index]);
+                                    }
+                                }
+                                if let Some(arr) = self.context.get_bool_param_array(array_name) {
+                                    if array_index < arr.len() {
+                                        let val = if arr[array_index] { 1 } else { 0 };
+                                        return Ok(self.model.int(val, val));
+                                    }
+                                }
+                                if let Some(arr) = self.context.get_float_var_array(array_name) {
+                                    if array_index < arr.len() {
+                                        return Ok(arr[array_index]);
+                                    }
+                                }
+                                if let Some(arr) = self.context.get_float_param_array(array_name) {
+                                    if array_index < arr.len() {
+                                        let val = arr[array_index];
+                                        return Ok(self.model.float(val, val));
+                                    }
+                                }
+                                
+                                return Err(Error::message(
+                                    &format!("Undefined array: '{}'", array_name),
+                                    array.span,
+                                ));
+                            }
+                            
+                            // Variable flattened index - use element constraint
+                            let index_var = self.get_var_or_value(&flat_index)?;
+                            let one = self.model.int(1, 1);
+                            
+                            if let Some(arr) = self.context.get_int_var_array(array_name) {
+                                let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element(&arr, zero_based_index, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr) = self.context.get_bool_var_array(array_name) {
+                                let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.bool();
+                                self.model.element(&arr, zero_based_index, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr) = self.context.get_float_var_array(array_name) {
+                                let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element(&arr, zero_based_index, result);
+                                return Ok(result);
+                            }
+                            
+                            return Err(Error::message(
+                                &format!("Undefined array: '{}'", array_name),
+                                array.span,
+                            ));
                         } else {
-                            // Variable indices - need to compute flattening at runtime
-                            // For now, return an error for runtime multi-dimensional indexing
-                            return Err(Error::unsupported_feature(
-                                "Variable multi-dimensional array access",
-                                "Phase 3",
-                                expr.span,
+                            // Variable indices - compute flattened index using constraints
+                            // Clone metadata to avoid borrow conflicts
+                            let metadata = metadata.clone();
+                            
+                            // Convert all indices to VarIds
+                            let mut index_vars = Vec::new();
+                            for idx in indices.iter() {
+                                index_vars.push(self.get_var_or_value(idx)?);
+                            }
+                            
+                            // Create auxiliary variable for flattened index (1-based)
+                            let flat_size = metadata.total_size() as i32;
+                            let flat_index_var = self.model.int(1, flat_size);
+                            
+                            // Build constraint: flat_index = i0*(d1*d2*...) + i1*(d2*d3*...) + ... + i_n
+                            // All indices are 1-based, convert to 0-based for flattening
+                            let mut flat_expr_parts = Vec::new();
+                            
+                            for (dim_idx, index_var) in index_vars.iter().enumerate() {
+                                // Calculate multiplier for this dimension
+                                let mut multiplier = 1usize;
+                                for d in &metadata.dimensions[(dim_idx + 1)..] {
+                                    multiplier *= d;
+                                }
+                                
+                                // Convert from 1-based to 0-based
+                                let one = self.model.int(1, 1);
+                                let zero_based_idx = self.model.sub(*index_var, one);
+                                
+                                if multiplier == 1 {
+                                    // Last dimension - just add zero-based index
+                                    flat_expr_parts.push(zero_based_idx);
+                                } else {
+                                    // Multiply index by multiplier
+                                    let mult_const = self.model.int(multiplier as i32, multiplier as i32);
+                                    let term = self.model.mul(zero_based_idx, mult_const);
+                                    flat_expr_parts.push(term);
+                                }
+                            }
+                            
+                            // Sum all parts and add 1 to convert back to 1-based
+                            let mut flat_zero_based = flat_expr_parts[0];
+                            for part in &flat_expr_parts[1..] {
+                                flat_zero_based = self.model.add(flat_zero_based, *part);
+                            }
+                            let one = self.model.int(1, 1);
+                            let flat_one_based = self.model.add(flat_zero_based, one);
+                            
+                            // Constraint: flat_index = computed_flat_index
+                            self.model.new(flat_index_var.eq(flat_one_based));
+                            
+                            // Use the flattened index with element constraint
+                            if let Some(arr) = self.context.get_int_var_array(array_name) {
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element(&arr, flat_index_var, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr) = self.context.get_bool_var_array(array_name) {
+                                let result = self.model.bool();
+                                self.model.element(&arr, flat_index_var, result);
+                                return Ok(result);
+                            }
+                            if let Some(arr) = self.context.get_float_var_array(array_name) {
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element(&arr, flat_index_var, result);
+                                return Ok(result);
+                            }
+                            
+                            return Err(Error::message(
+                                &format!("Undefined array: '{}'", array_name),
+                                array.span,
                             ));
                         }
                     } else {
@@ -1391,87 +1780,47 @@ impl Translator {
                             array.span,
                         ));
                     }
-                };
+                }
                 
-                let index = &flat_index;
+                // 1D array access - original logic
+                let index = &indices[0];
                 
                 // Try to evaluate the index expression to a constant first
                 if let Ok(index_val) = self.eval_int_expr(index) {
-                    // Constant index - direct array access (existing behavior)
-                    // Arrays in MiniZinc are 1-indexed, convert to 0-indexed
+                    // Constant index - direct array access
                     let array_index = (index_val - 1) as usize;
                     
-                    // Try to find the array (first check variable arrays, then parameter arrays)
                     if let Some(arr) = self.context.get_int_var_array(array_name) {
                         if array_index < arr.len() {
                             return Ok(arr[array_index]);
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     if let Some(arr) = self.context.get_int_param_array(array_name) {
                         if array_index < arr.len() {
-                            // Create a constant VarId for this parameter value
                             let val = arr[array_index];
                             return Ok(self.model.int(val, val));
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     if let Some(arr) = self.context.get_bool_var_array(array_name) {
                         if array_index < arr.len() {
                             return Ok(arr[array_index]);
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     if let Some(arr) = self.context.get_bool_param_array(array_name) {
                         if array_index < arr.len() {
-                            // Create a boolean VarId for this parameter value
                             let val = if arr[array_index] { 1 } else { 0 };
                             return Ok(self.model.int(val, val));
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     if let Some(arr) = self.context.get_float_var_array(array_name) {
                         if array_index < arr.len() {
                             return Ok(arr[array_index]);
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     if let Some(arr) = self.context.get_float_param_array(array_name) {
                         if array_index < arr.len() {
-                            // Create a constant VarId for this parameter value
                             let val = arr[array_index];
                             return Ok(self.model.float(val, val));
-                        } else {
-                            return Err(Error::message(
-                                &format!("Array index {} out of bounds (array size: {})",
-                                    index_val, arr.len()),
-                                index.span,
-                            ));
                         }
                     }
                     
@@ -1482,21 +1831,13 @@ impl Translator {
                 }
                 
                 // Variable index - use element constraint
-                // Get the index variable
                 let index_var = self.get_var_or_value(index)?;
-                
-                // MiniZinc arrays are 1-indexed, Selen is 0-indexed
-                // Selen's element constraint requires a direct VarId, not a computed expression
-                // So we create an auxiliary variable and constrain it
                 let one = self.model.int(1, 1);
                 
-                // Get the array and create element constraint
                 if let Some(arr) = self.context.get_int_var_array(array_name) {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
                     self.model.new(zero_based_index.eq(index_minus_one));
-                    
-                    // Create a result variable for array[index]
                     let result = self.model.int(i32::MIN, i32::MAX);
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
@@ -1505,7 +1846,6 @@ impl Translator {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
                     self.model.new(zero_based_index.eq(index_minus_one));
-                    
                     let result = self.model.bool();
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
@@ -1514,7 +1854,6 @@ impl Translator {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
                     self.model.new(zero_based_index.eq(index_minus_one));
-                    
                     let result = self.model.float(f64::MIN, f64::MAX);
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
