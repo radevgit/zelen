@@ -306,19 +306,16 @@ pub enum ObjectiveType {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use zelen::Translator;
 ///
-/// let ast = zelen::parse("var 1..10: x; solve satisfy;")?;
-/// let model_data = Translator::translate_with_vars(&ast)?;
+/// let ast = zelen::parse("var 1..10: x; solve satisfy;").unwrap();
+/// let model_data = Translator::translate_with_vars(&ast).unwrap();
 ///
 /// // Access variable information
 /// for (name, var_id) in &model_data.int_vars {
-///     println!("Variable: {}", name);
+///     let _ = (name, var_id);  // Variable available here
 /// }
-///
-/// // Solve the model
-/// let solution = model_data.model.solve()?;
 /// ```
 pub struct TranslatedModel {
     /// The Selen constraint model ready to solve
@@ -1040,8 +1037,8 @@ impl Translator {
                             return Err(Error::array2d_invalid_context(init.span));
                         }
                         
-                        let row_size = self.eval_int_expr(row_range)? as usize;
-                        let col_size = self.eval_int_expr(col_range)? as usize;
+                        let row_size = self.eval_index_set_size(row_range)?;
+                        let col_size = self.eval_index_set_size(col_range)?;
                         
                         if row_size != dimensions[0] || col_size != dimensions[1] {
                             return Err(Error::array2d_size_mismatch(
@@ -1098,9 +1095,9 @@ impl Translator {
                             return Err(Error::array3d_invalid_context(init.span));
                         }
                         
-                        let d1 = self.eval_int_expr(r1_range)? as usize;
-                        let d2 = self.eval_int_expr(r2_range)? as usize;
-                        let d3 = self.eval_int_expr(r3_range)? as usize;
+                        let d1 = self.eval_index_set_size(r1_range)?;
+                        let d2 = self.eval_index_set_size(r2_range)?;
+                        let d3 = self.eval_index_set_size(r3_range)?;
                         
                         if d1 != dimensions[0] || d2 != dimensions[1] || d3 != dimensions[2] {
                             return Err(Error::array3d_size_mismatch(

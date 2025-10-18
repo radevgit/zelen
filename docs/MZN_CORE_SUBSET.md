@@ -33,6 +33,8 @@
 - **Array initialization expressions**: `array[1..5] of int: costs = [10, 20, 30, 40, 50]` - **Phase 4**
 - **Output formatting**: `output ["x = ", show(x), "\n"];` with show() function and string concatenation - **Phase 4**
 - **Search annotations**: `solve :: int_search(..., complete) satisfy;` - parsed, strategies ignored - **Phase 4.5**
+- **Multi-dimensional array initializers**: `array2d(1..n, 1..m, values)` and `array3d(1..n, 1..m, 1..k, values)` - **Phase 4.5**
+- **Range expressions in array initializers**: Supports `array2d(1..n, 1..m, [...])` with range parameters - **Phase 4.5**
 - Direct execution and solution extraction
 - 50+ unit tests passing, 14 integration tests passing
 
@@ -66,6 +68,8 @@
 ✅ Optimization working (minimize, maximize)
 ✅ Multiple output statements supported
 ✅ Escape sequence processing in output strings
+✅ array2d() and array3d() initializers with range expressions (NEW - Phase 4.5)
+✅ Proper enum-based error handling for array size mismatches (NEW - Phase 4.5)
 ```
 
 ## Overview
@@ -1046,15 +1050,17 @@ When testing with Hakank MiniZinc examples, found these major blockers:
    - **Impact**: ~40% of Hakank files use set constraints
    - **Solution**: Phase 5+ implementation of set types and operations
 
-2. **Array Functions in Initializers** (COMMON, EASY FIX!)
+2. **Array Functions in Initializers** (COMPLETE! ✅)
    ```minizinc
    % In .dzn files (data files)
    currencies = array2d(1..4, 1..4, [values...]);  % 2D array initialization
    grid = array3d(1..2, 1..3, 1..4, [values...]);  % 3D array initialization
    ```
-   - **Status**: ✅ Translator has infrastructure, ❌ Parser doesn't recognize `array2d()`
-   - **Impact**: Many structured data problems use this
-   - **Solution**: Add parser support for `array2d()` and `array3d()` function calls in expressions
+   - **Status**: ✅ IMPLEMENTED - Parser recognizes `array2d()` and `array3d()` calls
+   - **Infrastructure**: ✅ Translator validates dimensions and extracts values
+   - **Validation**: ✅ Proper enum-based error messages with size mismatch details
+   - **Testing**: ✅ Tested with parameter arrays and range expressions (1..n)
+   - **Impact**: Many structured data problems now supported
 
 3. **Include Directives** (COMMON)
    ```minizinc

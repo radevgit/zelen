@@ -2,7 +2,7 @@ use std::fs;
 
 #[test]
 fn test_2d_grid_parsing() {
-    let mzn_code = fs::read_to_string("tests/models/test_2d_grid.mzn")
+    let mzn_code = fs::read_to_string("tests_all/models/test_2d_grid.mzn")
         .expect("Failed to read test_2d_grid.mzn");
     
     let ast = zelen::parse(&mzn_code)
@@ -32,7 +32,7 @@ fn test_2d_grid_parsing() {
 
 #[test]
 fn test_2d_grid_translation() {
-    let mzn_code = fs::read_to_string("tests/models/test_2d_grid.mzn")
+    let mzn_code = fs::read_to_string("tests_all/models/test_2d_grid.mzn")
         .expect("Failed to read test_2d_grid.mzn");
     
     let ast = zelen::parse(&mzn_code)

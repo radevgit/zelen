@@ -2,7 +2,7 @@ use std::fs;
 
 #[test]
 fn test_3d_cube_parsing() {
-    let mzn_code = fs::read_to_string("tests/models/test_3d_cube.mzn")
+    let mzn_code = fs::read_to_string("tests_all/models/test_3d_cube.mzn")
         .expect("Failed to read test_3d_cube.mzn");
     
     let ast = zelen::parse(&mzn_code)
@@ -32,7 +32,7 @@ fn test_3d_cube_parsing() {
 
 #[test]
 fn test_3d_cube_translation() {
-    let mzn_code = fs::read_to_string("tests/models/test_3d_cube.mzn")
+    let mzn_code = fs::read_to_string("tests_all/models/test_3d_cube.mzn")
         .expect("Failed to read test_3d_cube.mzn");
     
     let ast = zelen::parse(&mzn_code)

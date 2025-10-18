@@ -13,5 +13,8 @@ mod test_variable_indexing;
 #[path = "../tests_all/test_output_formatting.rs"]
 mod test_output_formatting;
 
+#[path = "../tests_all/test_array2d_array3d.rs"]
+mod test_array2d_array3d;
+
 
 

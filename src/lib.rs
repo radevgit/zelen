@@ -12,7 +12,7 @@
 //!
 //! ## Simple Usage
 //!
-//! ```ignore
+//! ```
 //! use zelen;
 //!
 //! let source = r#"
@@ -24,30 +24,25 @@
 //!
 //! // Parse and solve directly
 //! match zelen::solve(source) {
-//!     Ok(Ok(solution)) => println!("Found solution!"),
-//!     Ok(Err(_)) => println!("No solution exists"),
-//!     Err(e) => println!("Parse error: {}", e),
+//!     Ok(Ok(solution)) => { /* Found solution! */ },
+//!     Ok(Err(_)) => { /* No solution exists */ },
+//!     Err(e) => { /* Parse error */ },
 //! }
 //! ```
 //!
 //! ## With Variable Access
 //!
-//! ```ignore
+//! ```
 //! use zelen::Translator;
 //!
 //! let source = "var 1..10: x; solve satisfy;";
-//! let ast = zelen::parse(source)?;
-//! let model_data = Translator::translate_with_vars(&ast)?;
+//! let ast = zelen::parse(source).unwrap();
+//! let model_data = Translator::translate_with_vars(&ast).unwrap();
 //!
 //! // Access variables by name
 //! for (name, var_id) in &model_data.int_vars {
-//!     println!("Integer variable: {}", name);
-//! }
-//!
-//! // Solve and get results
-//! let solution = model_data.model.solve()?;
-//! for (name, var_id) in &model_data.int_vars {
-//!     println!("{} = {}", name, solution.get_int(*var_id));
+//!     // name is available here
+//!     let _ = (name, var_id);
 //! }
 //! ```
 //!
@@ -85,13 +80,14 @@ pub use selen::prelude::{Model, Solution, VarId};
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// use zelen::SolverConfig;
 ///
 /// let config = SolverConfig::default()
 ///     .with_time_limit_ms(5000)
 ///     .with_memory_limit_mb(1024)
 ///     .with_all_solutions(true);
+/// assert_eq!(config.time_limit_ms, Some(5000));
 /// ```
 #[derive(Debug, Clone)]
 pub struct SolverConfig {
@@ -166,8 +162,9 @@ impl SolverConfig {
 ///
 /// # Example
 ///
-/// ```ignore
-/// let ast = zelen::parse("var 1..10: x; solve satisfy;")?;
+/// ```
+/// let ast = zelen::parse("var 1..10: x; solve satisfy;");
+/// assert!(ast.is_ok());
 /// ```
 pub fn parse(source: &str) -> Result<ast::Model> {
     let lexer = Lexer::new(source);
@@ -187,10 +184,10 @@ pub fn parse(source: &str) -> Result<ast::Model> {
 ///
 /// # Example
 ///
-/// ```ignore
-/// let ast = zelen::parse("var 1..10: x; solve satisfy;")?;
-/// let model = zelen::translate(&ast)?;
-/// let solution = model.solve()?;
+/// ```
+/// let ast = zelen::parse("var 1..10: x; solve satisfy;").unwrap();
+/// let model = zelen::translate(&ast);
+/// assert!(model.is_ok());
 /// ```
 pub fn translate(ast: &ast::Model) -> Result<selen::prelude::Model> {
     Translator::translate(ast)
@@ -210,14 +207,13 @@ pub fn translate(ast: &ast::Model) -> Result<selen::prelude::Model> {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// let model = zelen::build_model(r#"
 ///     var 1..10: x;
 ///     constraint x > 5;
 ///     solve satisfy;
-/// "#)?;
-///
-/// let solution = model.solve()?;
+/// "#);
+/// assert!(model.is_ok());
 /// ```
 pub fn build_model(source: &str) -> Result<selen::prelude::Model> {
     let ast = parse(source)?;
@@ -239,13 +235,13 @@ pub fn build_model(source: &str) -> Result<selen::prelude::Model> {
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// let config = zelen::SolverConfig::default()
 ///     .with_time_limit_ms(5000)
 ///     .with_memory_limit_mb(1024);
-///
-/// let model = zelen::build_model_with_config(source, config)?;
-/// let solution = model.solve()?;
+/// 
+/// let model = zelen::build_model_with_config("var 1..10: x; solve satisfy;", config);
+/// assert!(model.is_ok());
 /// ```
 pub fn build_model_with_config(source: &str, config: SolverConfig) -> Result<selen::prelude::Model> {
     let ast = parse(source)?;
@@ -270,16 +266,13 @@ pub fn build_model_with_config(source: &str, config: SolverConfig) -> Result<sel
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```
 /// let config = zelen::SolverConfig::default()
-///     .with_all_solutions(true)
-///     .with_max_solutions(Some(10))
+///     .with_all_solutions(false)
 ///     .with_time_limit_ms(5000);
 ///
-/// let solutions = zelen::solve_with_config(source, config)?;
-/// for (i, solution) in solutions.iter().enumerate() {
-///     println!("Solution {}: found", i + 1);
-/// }
+/// let solutions = zelen::solve_with_config("var 1..10: x; solve satisfy;", config);
+/// assert!(solutions.is_ok());
 /// ```
 pub fn solve_with_config(
     source: &str,
@@ -316,16 +309,12 @@ pub fn solve_with_config(
 ///
 /// # Example
 ///
-/// ```ignore
-/// match zelen::solve(source) {
-///     Ok(Ok(solution)) => println!("Found solution!"),
-///     Ok(Err(_)) => println!("Problem is unsatisfiable"),
-///     Err(e) => println!("Parse error: {}", e),
+/// ```
+/// match zelen::solve("var 1..10: x; solve satisfy;") {
+///     Ok(Ok(solution)) => assert!(true), // Solution found
+///     Ok(Err(_)) => assert!(true), // Unsatisfiable
+///     Err(e) => panic!("Parse error: {}", e),
 /// }
-///
-/// // Or using the ? operator
-/// let solution = zelen::solve(source)??;  // Note: double ? for both Results
-/// println!("Found solution!");
 /// ```
 pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, selen::core::SolverError>> {
     let model = build_model(source)?;
