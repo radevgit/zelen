@@ -32,6 +32,7 @@
 - **Nested forall loops**: `forall(i in 1..n, j in i+1..n)(constraint)` for complex constraint patterns - **Phase 4**
 - **Array initialization expressions**: `array[1..5] of int: costs = [10, 20, 30, 40, 50]` - **Phase 4**
 - **Output formatting**: `output ["x = ", show(x), "\n"];` with show() function and string concatenation - **Phase 4**
+- **Search annotations**: `solve :: int_search(..., complete) satisfy;` - parsed, strategies ignored - **Phase 4.5**
 - Direct execution and solution extraction
 - 50+ unit tests passing, 14 integration tests passing
 
@@ -356,9 +357,8 @@ solve maximize profit;            % ✅ Application calls model.minimize/maximiz
 solve minimize sum(costs);        % ✅ Aggregate expressions supported
 solve maximize max(profits);      % ✅ Complex objectives work
 
-% With annotations - ❌ Phase 3
-solve :: int_search(x, input_order, indomain_min) 
-      satisfy;
+% With annotations - ✅ PARSED (Phase 4.5 - parsing only)
+solve :: int_search(x, input_order, indomain_min, complete) satisfy;
 ```
 
 **Status:**
@@ -366,7 +366,11 @@ solve :: int_search(x, input_order, indomain_min)
 - ✅ `solve minimize expr` → Stores ObjectiveType::Minimize and objective VarId
 - ✅ `solve maximize expr` → Stores ObjectiveType::Maximize and objective VarId
 - ✅ Applications call `model.minimize(var)` or `model.maximize(var)` as needed
-- ❌ Search annotations → Phase 3
+- ✅ **Search annotations parsing** → Parsed but strategies ignored (Phase 4.5)
+  - ✅ Extracts `complete`/`incomplete` search option
+  - ✅ Ignores variable selection strategies (first_fail, anti_first_fail, etc.)
+  - ✅ Ignores value selection strategies (indomain_min, indomain_max, etc.)
+  - ⚠️ Search option stored but not yet used in solver
 
 ### 1.5 Output Items
 
@@ -602,6 +606,29 @@ output [show(x[i]) ++ " " | i in 1..n];
 % Complex string formatting - ❌ Phase 5
 output ["Value: \(x div 10).\(x mod 10)\n"];
 ```
+
+## Phase 4.5: Search Annotations (PARSING ONLY ✅)
+
+### 4.5 Search Annotations ✅
+```minizinc
+% Search annotations - ✅ PARSED
+solve :: int_search(variables, var_select, val_select, search_option) satisfy;
+solve :: int_search(x, first_fail, indomain_min, complete) minimize cost;
+```
+
+**Status:**
+- ✅ Parsed and recognized during translation
+- ✅ Extracts `complete` or `incomplete` search option
+- ✅ Ignores variable selection strategies (first_fail, anti_first_fail, occurrence, etc.)
+- ✅ Ignores value selection strategies (indomain_min, indomain_max, indomain_split, etc.)
+- ⚠️ Search option stored in TranslatedModel but not yet used by solver
+
+**Implementation Details:**
+- Lexer recognizes `::` token (ColonColon)
+- Parser detects search annotations and skips non-essential parts
+- Extracts final argument: `complete` or `incomplete`
+- Defaults to `complete` if not specified
+- Allows more Hakank MiniZinc files to parse successfully
 
 ## Phase 5: Future Features
 
@@ -866,13 +893,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Success Metrics
 
-### Phase 1-4 Status ✅ (Phase 4 Complete)
+### Phase 1-4.5 Status ✅ (Phase 4.5 Complete - Parsing)
 - ✅ Parse MiniZinc directly
 - ✅ Build Selen Model objects (not strings!)
 - ✅ Support multi-dimensional arrays with variable indexing
 - ✅ Execute immediately
 - ✅ Extract solution values
 - ✅ Format output with show() statements
+- ✅ Parse search annotations (complete/incomplete)
 - ✅ Access solve statistics
 - ✅ Handle arrays with variable domains
 - ✅ Evaluate parameter expressions
@@ -910,13 +938,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 20. ✅ Solution value extraction
 
 ### Next Steps (Phase 5):
-1. ❌ Set types and operations
-2. ❌ Enumerated types
-3. ❌ String interpolation in output
-4. ❌ Array element output with variable indices
-5. ❌ Advanced string operations
-6. ❌ Let expressions
-7. ❌ User-defined predicates
+1. ❌ Use search_option (complete vs incomplete) to control Selen search
+2. ❌ Array comprehensions in constraints: `[expr | i in range]`
+3. ❌ Include directives for library files
+4. ❌ Set types and operations
+5. ❌ Enumerated types
+6. ❌ String interpolation in output
+7. ❌ Let expressions
+8. ❌ User-defined predicates
 
 ## References
 

@@ -64,6 +64,7 @@ pub enum TokenKind {
     
     Comma,        // ,
     Colon,        // :
+    ColonColon,   // ::
     Semicolon,    // ;
     Pipe,         // |
     
@@ -243,7 +244,12 @@ impl Lexer {
             }
             ':' => {
                 self.advance();
-                TokenKind::Colon
+                if self.current_char == Some(':') {
+                    self.advance();
+                    TokenKind::ColonColon
+                } else {
+                    TokenKind::Colon
+                }
             }
             ';' => {
                 self.advance();

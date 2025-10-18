@@ -283,6 +283,7 @@ pub struct Translator {
     objective_type: ObjectiveType,
     objective_var: Option<VarId>,
     output_items: Vec<ast::Expr>,
+    search_option: Option<ast::SearchOption>,
 }
 
 /// Optimization objective type for the solver
@@ -340,6 +341,8 @@ pub struct TranslatedModel {
     pub objective_var: Option<VarId>,
     /// Output expressions from output items (stored as AST for formatting during solution)
     pub output_items: Vec<ast::Expr>,
+    /// Search option from solve item (complete vs incomplete)
+    pub search_option: Option<ast::SearchOption>,
 }
 
 impl TranslatedModel {
@@ -565,6 +568,7 @@ impl Translator {
             objective_type: ObjectiveType::Satisfy,
             objective_var: None,
             output_items: Vec::new(),
+            search_option: None,
         }
     }
 
@@ -589,6 +593,7 @@ impl Translator {
             objective_type: ObjectiveType::Satisfy,
             objective_var: None,
             output_items: Vec::new(),
+            search_option: None,
         };
 
         // Process all items in order
@@ -665,6 +670,7 @@ impl Translator {
             objective_type: translator.objective_type,
             objective_var: translator.objective_var,
             output_items: translator.output_items,
+            search_option: translator.search_option,
         })
     }
 
@@ -1582,20 +1588,23 @@ impl Translator {
 
     fn translate_solve(&mut self, solve: &ast::Solve) -> Result<()> {
         match solve {
-            ast::Solve::Satisfy { .. } => {
+            ast::Solve::Satisfy { search_option, .. } => {
                 // Default behavior - no optimization
                 self.objective_type = ObjectiveType::Satisfy;
                 self.objective_var = None;
+                self.search_option = search_option.clone();
             }
-            ast::Solve::Minimize { expr, .. } => {
+            ast::Solve::Minimize { expr, search_option, .. } => {
                 let var = self.get_var_or_value(expr)?;
                 self.objective_type = ObjectiveType::Minimize;
                 self.objective_var = Some(var);
+                self.search_option = search_option.clone();
             }
-            ast::Solve::Maximize { expr, .. } => {
+            ast::Solve::Maximize { expr, search_option, .. } => {
                 let var = self.get_var_or_value(expr)?;
                 self.objective_type = ObjectiveType::Maximize;
                 self.objective_var = Some(var);
+                self.search_option = search_option.clone();
             }
         }
         Ok(())

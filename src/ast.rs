@@ -69,12 +69,21 @@ pub struct Constraint {
     pub span: Span,
 }
 
+/// Search options for solve items
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchOption {
+    /// Complete search (find all solutions)
+    Complete,
+    /// Incomplete search (may not find all solutions)
+    Incomplete,
+}
+
 /// Solve item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Solve {
-    Satisfy { span: Span },
-    Minimize { expr: Expr, span: Span },
-    Maximize { expr: Expr, span: Span },
+    Satisfy { search_option: Option<SearchOption>, span: Span },
+    Minimize { expr: Expr, search_option: Option<SearchOption>, span: Span },
+    Maximize { expr: Expr, search_option: Option<SearchOption>, span: Span },
 }
 
 /// Output item

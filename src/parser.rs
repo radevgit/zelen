@@ -258,10 +258,19 @@ impl Parser {
         let start = self.current_token.span.start;
         self.expect(TokenKind::Solve)?;
         
+        // Check for search annotation: :: int_search(...) or :: complete/incomplete
+        let search_option = if self.current_token.kind == TokenKind::ColonColon {
+            self.advance()?;
+            Some(self.parse_search_annotation()?)
+        } else {
+            None
+        };
+        
         let solve = match &self.current_token.kind {
             TokenKind::Satisfy => {
                 self.advance()?;
                 Solve::Satisfy {
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -270,6 +279,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Solve::Minimize {
                     expr,
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -278,6 +288,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Solve::Maximize {
                     expr,
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -293,6 +304,87 @@ impl Parser {
         self.expect(TokenKind::Semicolon)?;
         
         Ok(Item::Solve(solve))
+    }
+    
+    /// Parse search annotation: int_search(...) and extract complete/incomplete option
+    fn parse_search_annotation(&mut self) -> Result<SearchOption> {
+        // We parse the annotation but only extract complete/incomplete
+        // We ignore variable selection and value selection strategies
+        
+        // Expected format: int_search(variables, var_select, val_select, complete/incomplete)
+        // or just: complete or incomplete
+        
+        if let TokenKind::Ident(name) = &self.current_token.kind {
+            let name_str = name.clone();
+            
+            if name_str == "complete" {
+                self.advance()?;
+                return Ok(SearchOption::Complete);
+            } else if name_str == "incomplete" {
+                self.advance()?;
+                return Ok(SearchOption::Incomplete);
+            } else if name_str == "int_search" || name_str == "bool_search" || name_str == "float_search" {
+                // Parse function call: int_search(args...)
+                self.advance()?;
+                self.expect(TokenKind::LParen)?;
+                
+                // Parse arguments: skip first 3 (variables, var_select, val_select)
+                let mut paren_depth = 1;
+                let mut arg_count = 0;
+                
+                while paren_depth > 0 && self.current_token.kind != TokenKind::Eof {
+                    match &self.current_token.kind {
+                        TokenKind::LParen => paren_depth += 1,
+                        TokenKind::RParen => paren_depth -= 1,
+                        TokenKind::Comma if paren_depth == 1 => arg_count += 1,
+                        _ => {}
+                    }
+                    
+                    // Check the 4th argument (index 3) for complete/incomplete
+                    if paren_depth == 1 && arg_count == 3 {
+                        if let TokenKind::Ident(opt) = &self.current_token.kind {
+                            let opt_str = opt.clone();
+                            if opt_str == "complete" {
+                                // Consume the rest of the annotation
+                                while self.current_token.kind != TokenKind::RParen && 
+                                      self.current_token.kind != TokenKind::Eof {
+                                    self.advance()?;
+                                }
+                                if self.current_token.kind == TokenKind::RParen {
+                                    self.advance()?;
+                                }
+                                return Ok(SearchOption::Complete);
+                            } else if opt_str == "incomplete" {
+                                // Consume the rest of the annotation
+                                while self.current_token.kind != TokenKind::RParen && 
+                                      self.current_token.kind != TokenKind::Eof {
+                                    self.advance()?;
+                                }
+                                if self.current_token.kind == TokenKind::RParen {
+                                    self.advance()?;
+                                }
+                                return Ok(SearchOption::Incomplete);
+                            }
+                        }
+                    }
+                    
+                    self.advance()?;
+                }
+                
+                // Default to complete if not specified
+                return Ok(SearchOption::Complete);
+            }
+        }
+        
+        // If it's not recognized, skip to next valid token and default to complete
+        while self.current_token.kind != TokenKind::Satisfy && 
+              self.current_token.kind != TokenKind::Minimize &&
+              self.current_token.kind != TokenKind::Maximize &&
+              self.current_token.kind != TokenKind::Eof {
+            self.advance()?;
+        }
+        
+        Ok(SearchOption::Complete)
     }
     
     /// Parse output item: `output ["x = ", show(x)];`
