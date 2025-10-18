@@ -42,6 +42,38 @@ pub enum ErrorKind {
     DuplicateDeclaration(String),
     UndefinedVariable(String),
     
+    // Array-related errors
+    ArraySizeMismatch {
+        declared: usize,
+        provided: usize,
+    },
+    Array2DSizeMismatch {
+        declared_rows: usize,
+        declared_cols: usize,
+        provided_rows: usize,
+        provided_cols: usize,
+    },
+    Array3DSizeMismatch {
+        declared_d1: usize,
+        declared_d2: usize,
+        declared_d3: usize,
+        provided_d1: usize,
+        provided_d2: usize,
+        provided_d3: usize,
+    },
+    Array2DValueCountMismatch {
+        expected: usize,
+        provided: usize,
+    },
+    Array3DValueCountMismatch {
+        expected: usize,
+        provided: usize,
+    },
+    Array2DInvalidContext,
+    Array3DInvalidContext,
+    Array2DValuesMustBeLiteral,
+    Array3DValuesMustBeLiteral,
+    
     // General
     Message(String),
 }
@@ -93,6 +125,63 @@ impl Error {
             },
             span,
         )
+    }
+    
+    pub fn array_size_mismatch(declared: usize, provided: usize, span: Span) -> Self {
+        Self::new(
+            ErrorKind::ArraySizeMismatch { declared, provided },
+            span,
+        )
+    }
+    
+    pub fn array2d_size_mismatch(declared_rows: usize, declared_cols: usize, 
+                                  provided_rows: usize, provided_cols: usize, span: Span) -> Self {
+        Self::new(
+            ErrorKind::Array2DSizeMismatch { 
+                declared_rows, declared_cols, provided_rows, provided_cols 
+            },
+            span,
+        )
+    }
+    
+    pub fn array3d_size_mismatch(declared_d1: usize, declared_d2: usize, declared_d3: usize,
+                                  provided_d1: usize, provided_d2: usize, provided_d3: usize, span: Span) -> Self {
+        Self::new(
+            ErrorKind::Array3DSizeMismatch {
+                declared_d1, declared_d2, declared_d3, provided_d1, provided_d2, provided_d3
+            },
+            span,
+        )
+    }
+    
+    pub fn array2d_value_count_mismatch(expected: usize, provided: usize, span: Span) -> Self {
+        Self::new(
+            ErrorKind::Array2DValueCountMismatch { expected, provided },
+            span,
+        )
+    }
+    
+    pub fn array3d_value_count_mismatch(expected: usize, provided: usize, span: Span) -> Self {
+        Self::new(
+            ErrorKind::Array3DValueCountMismatch { expected, provided },
+            span,
+        )
+    }
+    
+    pub fn array2d_invalid_context(span: Span) -> Self {
+        Self::new(ErrorKind::Array2DInvalidContext, span)
+    }
+    
+    pub fn array3d_invalid_context(span: Span) -> Self {
+        Self::new(ErrorKind::Array3DInvalidContext, span)
+    }
+    
+    pub fn array2d_values_must_be_literal(span: Span) -> Self {
+        Self::new(ErrorKind::Array2DValuesMustBeLiteral, span)
+    }
+    
+    pub fn array3d_values_must_be_literal(span: Span) -> Self {
+        Self::new(ErrorKind::Array3DValuesMustBeLiteral, span)
     }
     
     pub fn message(msg: &str, span: Span) -> Self {
@@ -206,6 +295,35 @@ impl fmt::Display for Error {
             }
             ErrorKind::UndefinedVariable(name) => {
                 write!(f, "Undefined variable '{}'", name)
+            }
+            ErrorKind::ArraySizeMismatch { declared, provided } => {
+                write!(f, "Array size mismatch: declared {}, but got {}", declared, provided)
+            }
+            ErrorKind::Array2DSizeMismatch { declared_rows, declared_cols, provided_rows, provided_cols } => {
+                write!(f, "array2d size mismatch: declared {}x{}, but provided {}x{}", 
+                    declared_rows, declared_cols, provided_rows, provided_cols)
+            }
+            ErrorKind::Array3DSizeMismatch { declared_d1, declared_d2, declared_d3, provided_d1, provided_d2, provided_d3 } => {
+                write!(f, "array3d size mismatch: declared {}x{}x{}, but provided {}x{}x{}", 
+                    declared_d1, declared_d2, declared_d3, provided_d1, provided_d2, provided_d3)
+            }
+            ErrorKind::Array2DValueCountMismatch { expected, provided } => {
+                write!(f, "array2d value count mismatch: expected {}, got {}", expected, provided)
+            }
+            ErrorKind::Array3DValueCountMismatch { expected, provided } => {
+                write!(f, "array3d value count mismatch: expected {}, got {}", expected, provided)
+            }
+            ErrorKind::Array2DInvalidContext => {
+                write!(f, "array2d() can only be used for 2D arrays")
+            }
+            ErrorKind::Array3DInvalidContext => {
+                write!(f, "array3d() can only be used for 3D arrays")
+            }
+            ErrorKind::Array2DValuesMustBeLiteral => {
+                write!(f, "array2d() values must be an array literal [...]")
+            }
+            ErrorKind::Array3DValuesMustBeLiteral => {
+                write!(f, "array3d() values must be an array literal [...]")
             }
             ErrorKind::Message(msg) => {
                 write!(f, "{}", msg)

@@ -172,6 +172,23 @@ pub enum ExprKind {
         body: Box<Expr>,
     },
     
+    /// Array2D initializer: `array2d(row_range, col_range, [values...])`
+    /// Wraps a flat array into a 2D structure
+    Array2D {
+        row_range: Box<Expr>,
+        col_range: Box<Expr>,
+        values: Box<Expr>,  // Should be an ArrayLit
+    },
+    
+    /// Array3D initializer: `array3d(r1_range, r2_range, r3_range, [values...])`
+    /// Wraps a flat array into a 3D structure
+    Array3D {
+        r1_range: Box<Expr>,
+        r2_range: Box<Expr>,
+        r3_range: Box<Expr>,
+        values: Box<Expr>,  // Should be an ArrayLit
+    },
+    
     /// Implicit index set for arrays: `int` in `array[int]`
     ImplicitIndexSet(BaseType),
 }

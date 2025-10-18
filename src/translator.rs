@@ -993,15 +993,12 @@ impl Translator {
         } else {
             // Parameter array - extract values from initializer
             if let Some(init) = init_expr {
-                // Extract array literal from initializer
+                // Extract array literal or array2d/array3d initializer
                 match &init.kind {
                     ast::ExprKind::ArrayLit(elements) => {
                         // Verify size matches
                         if elements.len() != size {
-                            return Err(Error::message(
-                                &format!("Array size mismatch: declared {}, but got {}", size, elements.len()),
-                                init.span,
-                            ));
+                            return Err(Error::array_size_mismatch(size, elements.len(), init.span));
                         }
                         
                         // Determine element type and extract values
@@ -1037,9 +1034,129 @@ impl Translator {
                             _ => unreachable!(),
                         }
                     }
+                    ast::ExprKind::Array2D { row_range, col_range, values } => {
+                        // Handle array2d initializer for 2D parameter arrays
+                        if dimensions.len() != 2 {
+                            return Err(Error::array2d_invalid_context(init.span));
+                        }
+                        
+                        let row_size = self.eval_int_expr(row_range)? as usize;
+                        let col_size = self.eval_int_expr(col_range)? as usize;
+                        
+                        if row_size != dimensions[0] || col_size != dimensions[1] {
+                            return Err(Error::array2d_size_mismatch(
+                                dimensions[0], dimensions[1], row_size, col_size, init.span
+                            ));
+                        }
+                        
+                        // Extract values from array literal
+                        if let ast::ExprKind::ArrayLit(elements) = &values.kind {
+                            let expected_len = row_size * col_size;
+                            if elements.len() != expected_len {
+                                return Err(Error::array2d_value_count_mismatch(expected_len, elements.len(), values.span));
+                            }
+                            
+                            // Determine element type and extract values
+                            match element_type {
+                                ast::TypeInst::Constrained { base_type, .. } | ast::TypeInst::Basic { base_type, .. } => {
+                                    match base_type {
+                                        ast::BaseType::Int => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_int_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_int_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Float => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_float_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_float_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Bool => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_bool_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_bool_param_array(name.to_string(), values);
+                                        }
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            return Err(Error::array2d_values_must_be_literal(values.span));
+                        }
+                    }
+                    ast::ExprKind::Array3D { r1_range, r2_range, r3_range, values } => {
+                        // Handle array3d initializer for 3D parameter arrays
+                        if dimensions.len() != 3 {
+                            return Err(Error::array3d_invalid_context(init.span));
+                        }
+                        
+                        let d1 = self.eval_int_expr(r1_range)? as usize;
+                        let d2 = self.eval_int_expr(r2_range)? as usize;
+                        let d3 = self.eval_int_expr(r3_range)? as usize;
+                        
+                        if d1 != dimensions[0] || d2 != dimensions[1] || d3 != dimensions[2] {
+                            return Err(Error::array3d_size_mismatch(
+                                dimensions[0], dimensions[1], dimensions[2],
+                                d1, d2, d3,
+                                init.span
+                            ));
+                        }
+                        
+                        // Extract values from array literal
+                        if let ast::ExprKind::ArrayLit(elements) = &values.kind {
+                            let expected_len = d1 * d2 * d3;
+                            if elements.len() != expected_len {
+                                return Err(Error::array3d_value_count_mismatch(expected_len, elements.len(), values.span));
+                            }
+                            
+                            // Determine element type and extract values
+                            match element_type {
+                                ast::TypeInst::Constrained { base_type, .. } | ast::TypeInst::Basic { base_type, .. } => {
+                                    match base_type {
+                                        ast::BaseType::Int => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_int_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_int_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Float => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_float_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_float_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Bool => {
+                                            let mut values = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                let val = self.eval_bool_expr(elem)?;
+                                                values.push(val);
+                                            }
+                                            self.context.add_bool_param_array(name.to_string(), values);
+                                        }
+                                    }
+                                }
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            return Err(Error::array3d_values_must_be_literal(values.span));
+                        }
+                    }
                     _ => {
-                        return Err(Error::message(
-                            "Array initialization must be an array literal [...]",
+                        return Err(Error::unsupported_feature(
+                            "Array initialization must be an array literal [...], array2d(...), or array3d(...)",
+                            "Phase 4",
                             init.span,
                         ));
                     }

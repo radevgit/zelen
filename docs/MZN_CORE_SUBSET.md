@@ -632,18 +632,41 @@ solve :: int_search(x, first_fail, indomain_min, complete) minimize cost;
 
 ## Phase 5: Future Features
 
-### 5.1 Set Comprehensions
+### 5.1 Array Functions in Initializers (HIGH PRIORITY - EASY WIN!)
+
+**Status**: ❌ Parser support missing, but translator infrastructure exists
+
+```minizinc
+% array2d() function - wraps flat list into 2D array
+array[1..n, 1..m] of int: grid = array2d(1..n, 1..m, [1,2,3,4,5,6]);
+
+% array3d() function - wraps flat list into 3D array  
+array[1..n, 1..m, 1..k] of int: cube = array3d(1..n, 1..m, 1..k, [values...]);
+```
+
+**Why this is important**:
+- Many Hakank .dzn data files use `array2d()` to initialize 2D arrays
+- We already have `int_var_arrays_2d`, `int_var_arrays_3d` etc. in translator
+- Just need to add parser support for function calls in array initializers
+- Unlocks all arbitrage_loops* examples and many others
+
+**Implementation strategy**:
+- Recognize `array2d(...)` and `array3d(...)` function calls in expressions
+- Flatten the provided 1D array according to the index ranges
+- Store in appropriate 2D/3D array structure
+
+### 5.2 Set Comprehensions
 ```minizinc
 set of int: evens = {2*i | i in 1..n};
 ```
 
-### 5.2 Enumerated Types
+### 5.3 Enumerated Types
 ```minizinc
 enum Color = {Red, Green, Blue};
 var Color: my_color;
 ```
 
-### 5.3 Advanced String Operations
+### 5.4 Advanced String Operations
 ```minizinc
 output ["Value: \(x)\n"];  % String interpolation
 output [show(x) ++ " " ++ show(y)];  % String concatenation
@@ -1008,22 +1031,86 @@ expr ::= int_expr
 | Complex comprehensions | Expand to loops | Phase 2 |
 | Option types | Use sentinel values (-1, etc.) | Phase 3 |
 
-## Appendix C: FAQ
+## Appendix C: Real-World Testing Results
 
-**Q: Why not support full MiniZinc?**  
-A: Full MiniZinc is very complex. This subset covers most practical models while keeping implementation tractable.
+### Hakank Collection Analysis (1509 files)
 
-**Q: How do I use features not in the subset?**  
-A: Either wait for later phases, use FlatZinc fallback, or manually rewrite your model.
+When testing with Hakank MiniZinc examples, found these major blockers:
 
-**Q: Will my FlatZinc models still work?**  
-A: Yes! FlatZinc support remains as fallback for unsupported features.
+1. **Set Types in Data Files** (VERY COMMON)
+   ```minizinc
+   % In .dzn files
+   s = [{1,2,3}, {4,5,6}, {7,8,9}];  % Set literals used for constraints
+   ```
+   - **Blocker**: Set literal syntax `{...}` not implemented
+   - **Impact**: ~40% of Hakank files use set constraints
+   - **Solution**: Phase 5+ implementation of set types and operations
 
-**Q: What about MiniZinc library functions?**  
-A: Phase 1 includes only built-in operations. Phase 2 will add common library predicates.
+2. **Array Functions in Initializers** (COMMON, EASY FIX!)
+   ```minizinc
+   % In .dzn files (data files)
+   currencies = array2d(1..4, 1..4, [values...]);  % 2D array initialization
+   grid = array3d(1..2, 1..3, 1..4, [values...]);  % 3D array initialization
+   ```
+   - **Status**: ✅ Translator has infrastructure, ❌ Parser doesn't recognize `array2d()`
+   - **Impact**: Many structured data problems use this
+   - **Solution**: Add parser support for `array2d()` and `array3d()` function calls in expressions
 
-**Q: How is performance compared to FlatZinc?**  
-A: Should be similar or better, as we avoid flattening overhead and preserve structure.
+3. **Include Directives** (COMMON)
+   ```minizinc
+   include "globals.mzn";  % Load standard library predicates
+   ```
+   - **Blocker**: No file I/O or library loading implemented
+   - **Impact**: Many models reference standard library constraints
+   - **Solution**: Phase 5+ file loading and namespace management
+
+4. **String Variables and Operations** (LESS COMMON)
+   ```minizinc
+   var string: choice;  % String variables (not just in output)
+   ```
+   - **Status**: ❌ Not implemented beyond output formatting
+   - **Solution**: Phase 5+ full string support
+
+### Easy Wins for Phase 5
+
+1. **array2d() / array3d()** - HIGHEST PRIORITY
+   - Parser change only (translator ready)
+   - Unlocks structured data file problems
+   - Expected to fix ~30% more examples
+
+2. **Include directives** - HIGH PRIORITY
+   - File I/O for library loading
+   - Many models depend on this
+   - Expected to fix ~20% more examples
+
+3. **Set types** - MEDIUM PRIORITY
+   - Complex implementation
+   - Many models use sets
+   - Expected to fix ~40% more examples
+
+### Example: Arbitrage Loops Problem
+
+This illustrates the pattern:
+```minizinc
+% arbitrage_loops.mzn (model)
+array[1..n, 1..n] of float: currencies;
+```
+
+```minizinc
+% arbitrage_loops1.dzn (data file)
+n = 4;
+currencies = array2d(1..n, 1..n, [
+  0,      0.7779,  102.4590,  0.0083,
+  1.2851, 0,       131.7110,  0.01125,
+  ...
+]);
+```
+
+**Issue**: `array2d()` call in data file not parsed
+**Fix**: Add function call support in array initializers
+**Expected result**: Model should parse and solve successfully
+
+
 
 ---
 

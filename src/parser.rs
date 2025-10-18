@@ -551,43 +551,84 @@ impl Parser {
                         let name = name.clone();
                         self.advance()?;
                         
-                        let mut args = Vec::new();
-                        if self.current_token.kind != TokenKind::RParen {
-                            loop {
-                                // Check for generator call: forall(i in 1..n)(expr)
-                                if self.is_generator_start() {
-                                    let generators = self.parse_generators()?;
-                                    self.expect(TokenKind::RParen)?;
-                                    self.expect(TokenKind::LParen)?;
-                                    let body = self.parse_expr()?;
-                                    self.expect(TokenKind::RParen)?;
+                        // Special handling for array2d and array3d
+                        if name == "array2d" {
+                            let row_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let col_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let values = self.parse_expr()?;
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Array2D {
+                                    row_range: Box::new(row_range),
+                                    col_range: Box::new(col_range),
+                                    values: Box::new(values),
+                                },
+                            };
+                        } else if name == "array3d" {
+                            let r1_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let r2_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let r3_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let values = self.parse_expr()?;
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Array3D {
+                                    r1_range: Box::new(r1_range),
+                                    r2_range: Box::new(r2_range),
+                                    r3_range: Box::new(r3_range),
+                                    values: Box::new(values),
+                                },
+                            };
+                        } else {
+                            // Regular function call
+                            let mut args = Vec::new();
+                            if self.current_token.kind != TokenKind::RParen {
+                                loop {
+                                    // Check for generator call: forall(i in 1..n)(expr)
+                                    if self.is_generator_start() {
+                                        let generators = self.parse_generators()?;
+                                        self.expect(TokenKind::RParen)?;
+                                        self.expect(TokenKind::LParen)?;
+                                        let body = self.parse_expr()?;
+                                        self.expect(TokenKind::RParen)?;
+                                        
+                                        let end = self.current_token.span.end;
+                                        return Ok(Expr {
+                                            span: Span::new(expr.span.start, end),
+                                            kind: ExprKind::GenCall {
+                                                name,
+                                                generators,
+                                                body: Box::new(body),
+                                            },
+                                        });
+                                    }
                                     
-                                    let end = self.current_token.span.end;
-                                    return Ok(Expr {
-                                        span: Span::new(expr.span.start, end),
-                                        kind: ExprKind::GenCall {
-                                            name,
-                                            generators,
-                                            body: Box::new(body),
-                                        },
-                                    });
+                                    args.push(self.parse_expr()?);
+                                    if self.current_token.kind != TokenKind::Comma {
+                                        break;
+                                    }
+                                    self.advance()?;
                                 }
-                                
-                                args.push(self.parse_expr()?);
-                                if self.current_token.kind != TokenKind::Comma {
-                                    break;
-                                }
-                                self.advance()?;
                             }
+                            
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Call { name, args },
+                            };
                         }
-                        
-                        self.expect(TokenKind::RParen)?;
-                        
-                        let end = self.current_token.span.end;
-                        expr = Expr {
-                            span: Span::new(expr.span.start, end),
-                            kind: ExprKind::Call { name, args },
-                        };
                     } else {
                         break;
                     }
