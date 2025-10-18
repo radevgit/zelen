@@ -15,13 +15,6 @@ struct ArrayMetadata {
 }
 
 impl ArrayMetadata {
-    /// Create metadata for a 1D array
-    fn new_1d(size: usize) -> Self {
-        Self {
-            dimensions: vec![size],
-        }
-    }
-
     /// Create metadata for a multi-dimensional array
     fn new(dimensions: Vec<usize>) -> Self {
         Self { dimensions }
@@ -1317,7 +1310,7 @@ impl Translator {
             }
             // Comparison operators - just evaluate them directly in constraint context
             // We don't need reification for simple cases
-            ast::ExprKind::BinOp { op, left, right } if matches!(op,
+            ast::ExprKind::BinOp { op, .. } if matches!(op,
                 ast::BinOp::Lt | ast::BinOp::Le | ast::BinOp::Gt |
                 ast::BinOp::Ge | ast::BinOp::Eq | ast::BinOp::Ne) => {
                 // For now, treat comparison in boolean context as always true
