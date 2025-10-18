@@ -289,7 +289,17 @@ fn print_solution(
         // Print integer variables
         for (name, var_id) in &model_data.int_vars {
             let value = solution.get_int(*var_id);
-            println!("{} = {};", name, value);
+            // Check if this is an enum variable
+            if let Some((_, enum_values)) = model_data.enum_vars.get(name) {
+                if value >= 1 && (value as usize) <= enum_values.len() {
+                    let enum_str = &enum_values[(value - 1) as usize];
+                    println!("{} = {};", name, enum_str);
+                } else {
+                    println!("{} = {};", name, value);
+                }
+            } else {
+                println!("{} = {};", name, value);
+            }
         }
 
         // Print boolean variables (as 0/1 in MiniZinc format)
@@ -307,12 +317,27 @@ fn print_solution(
         // Print integer arrays
         for (name, var_ids) in &model_data.int_var_arrays {
             print!("{} = [", name);
+            // Check if this is an enum array
+            let is_enum = model_data.enum_vars.contains_key(name);
+            let enum_values = model_data.enum_vars.get(name).map(|(_, vals)| vals);
             for (i, var_id) in var_ids.iter().enumerate() {
                 if i > 0 {
                     print!(", ");
                 }
                 let value = solution.get_int(*var_id);
-                print!("{}", value);
+                if is_enum {
+                    if let Some(vals) = enum_values {
+                        if value >= 1 && (value as usize) <= vals.len() {
+                            print!("{}", vals[(value - 1) as usize]);
+                        } else {
+                            print!("{}", value);
+                        }
+                    } else {
+                        print!("{}", value);
+                    }
+                } else {
+                    print!("{}", value);
+                }
             }
             println!("];");
         }

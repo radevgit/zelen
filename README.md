@@ -214,9 +214,6 @@ The repository includes runnable examples:
 cargo run --release --example queens4      # 4-Queens solver
 cargo run --release --example solve_nqueens # N-Queens solver
 cargo run --release --example bool_float_demo  # Boolean and float operations
-
-# Run tests
-cargo test --lib  # Unit tests (52 tests)
 ```
 
 See `examples/` directory for source code and `examples/models/` for test MiniZinc files.
@@ -235,6 +232,8 @@ See `examples/` directory for source code and `examples/models/` for test MiniZi
 - ✅ Modulo operator
 - ✅ Satisfy/Minimize/Maximize
 - ✅ Multiple input formats (.mzn and .dzn files)
+- ✅ **Enumerated types**: `enum Color = {Red, Green, Blue};` and `var Color: x;`
+- ✅ **Array2D and Array3D** types with proper flattening
 
 ### Not Supported
 - ❌ Set operations
@@ -242,6 +241,8 @@ See `examples/` directory for source code and `examples/models/` for test MiniZi
 - ❌ Advanced global constraints (cumulative, circuit, etc.)
 - ❌ Search annotations
 - ❌ Some output predicates
+- ❌ Include directives (globals.mzn not needed for current model set)
+```
 
 ## Architecture
 

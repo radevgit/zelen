@@ -13,6 +13,8 @@ pub struct Model {
 /// Top-level items in a MiniZinc model
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    /// Enum definition: `enum Color = {Red, Green, Blue};`
+    EnumDef(EnumDef),
     /// Variable or parameter declaration: `int: n = 5;`
     VarDecl(VarDecl),
     /// Constraint: `constraint x < y;`
@@ -21,6 +23,14 @@ pub enum Item {
     Solve(Solve),
     /// Output item: `output ["x = ", show(x)];`
     Output(Output),
+}
+
+/// Enumerated type definition
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub values: Vec<String>,
+    pub span: Span,
 }
 
 /// Variable or parameter declaration
@@ -60,6 +70,8 @@ pub enum BaseType {
     Bool,
     Int,
     Float,
+    /// Enumerated type (stored as integer domain internally)
+    Enum(String),
 }
 
 /// Constraint item
@@ -298,9 +310,10 @@ impl fmt::Display for UnOp {
 impl fmt::Display for BaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            BaseType::Bool => "bool",
-            BaseType::Int => "int",
-            BaseType::Float => "float",
+            BaseType::Bool => "bool".to_string(),
+            BaseType::Int => "int".to_string(),
+            BaseType::Float => "float".to_string(),
+            BaseType::Enum(name) => name.clone(),
         };
         write!(f, "{}", s)
     }

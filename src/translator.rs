@@ -102,6 +102,8 @@ struct TranslatorContext {
     bool_param_arrays: HashMap<String, Vec<bool>>,
     /// Metadata for multi-dimensional arrays (name -> dimensions)
     array_metadata: HashMap<String, ArrayMetadata>,
+    /// Enumerated type definitions: enum_name -> list of values
+    enums: HashMap<String, Vec<String>>,
 }
 
 impl TranslatorContext {
@@ -126,6 +128,7 @@ impl TranslatorContext {
             float_param_arrays: HashMap::new(),
             bool_param_arrays: HashMap::new(),
             array_metadata: HashMap::new(),
+            enums: HashMap::new(),
         }
     }
 
@@ -284,6 +287,8 @@ pub struct Translator {
     objective_var: Option<VarId>,
     output_items: Vec<ast::Expr>,
     search_option: Option<ast::SearchOption>,
+    /// Map from variable name to (enum_name, enum_values) for output formatting
+    enum_var_mapping: HashMap<String, (String, Vec<String>)>,
 }
 
 /// Optimization objective type for the solver
@@ -340,6 +345,9 @@ pub struct TranslatedModel {
     pub output_items: Vec<ast::Expr>,
     /// Search option from solve item (complete vs incomplete)
     pub search_option: Option<ast::SearchOption>,
+    /// Enum definitions: maps variable name to (enum_name, enum_values)
+    /// Used for output formatting to convert integers back to enum names
+    pub enum_vars: HashMap<String, (String, Vec<String>)>,
 }
 
 impl TranslatedModel {
@@ -566,6 +574,7 @@ impl Translator {
             objective_var: None,
             output_items: Vec::new(),
             search_option: None,
+            enum_var_mapping: HashMap::new(),
         }
     }
 
@@ -591,6 +600,7 @@ impl Translator {
             objective_var: None,
             output_items: Vec::new(),
             search_option: None,
+            enum_var_mapping: HashMap::new(),
         };
 
         // Process all items in order
@@ -609,6 +619,16 @@ impl Translator {
         // This helps Selen's propagators work with narrowed variable domains
         
         let debug = std::env::var("TRANSLATOR_DEBUG").is_ok();
+        
+        // Pass 0: Enum definitions (must be processed first)
+        if debug {
+            eprintln!("TRANSLATOR_DEBUG: PASS 0 - Enum definitions");
+        }
+        for item in &ast.items {
+            if matches!(item, ast::Item::EnumDef(_)) {
+                translator.translate_item(item)?;
+            }
+        }
         
         // Pass 1: Variable declarations
         if debug {
@@ -641,6 +661,7 @@ impl Translator {
         }
         for item in &ast.items {
             match item {
+                ast::Item::EnumDef(_) => {} // Already done in pass 0
                 ast::Item::VarDecl(_) => {} // Already done in pass 1
                 ast::Item::Constraint(c) => {
                     if !Self::is_simple_equality_constraint(&c.expr) {
@@ -658,8 +679,8 @@ impl Translator {
 
         Ok(TranslatedModel {
             model: translator.model,
-            int_vars: translator.context.int_vars,
-            int_var_arrays: translator.context.int_var_arrays,
+            int_vars: translator.context.int_vars.clone(),
+            int_var_arrays: translator.context.int_var_arrays.clone(),
             bool_vars: translator.context.bool_vars,
             bool_var_arrays: translator.context.bool_var_arrays,
             float_vars: translator.context.float_vars,
@@ -668,6 +689,7 @@ impl Translator {
             objective_var: translator.objective_var,
             output_items: translator.output_items,
             search_option: translator.search_option,
+            enum_vars: translator.enum_var_mapping,
         })
     }
 
@@ -711,6 +733,11 @@ impl Translator {
 
     fn translate_item(&mut self, item: &ast::Item) -> Result<()> {
         match item {
+            ast::Item::EnumDef(enum_def) => {
+                // Store enum definition for later use
+                self.context.enums.insert(enum_def.name.clone(), enum_def.values.clone());
+                Ok(())
+            }
             ast::Item::VarDecl(var_decl) => self.translate_var_decl(var_decl),
             ast::Item::Constraint(constraint) => self.translate_constraint(constraint),
             ast::Item::Solve(solve) => self.translate_solve(solve),
@@ -743,6 +770,24 @@ impl Translator {
                             let var = self.model.float(f64::MIN, f64::MAX);
                             self.context.add_float_var(var_decl.name.clone(), var);
                         }
+                        ast::BaseType::Enum(enum_name) => {
+                            // var EnumType: x
+                            // Map to integer domain 1..cardinality
+                            let enum_values = self.context.enums.get(enum_name)
+                                .ok_or_else(|| Error::message(
+                                    &format!("Undefined enum type: {}", enum_name),
+                                    var_decl.span,
+                                ))?
+                                .clone();
+                            let cardinality = enum_values.len() as i32;
+                            let var = self.model.int(1, cardinality);
+                            self.context.add_int_var(var_decl.name.clone(), var);
+                            // Track this variable as an enum for output formatting
+                            self.enum_var_mapping.insert(
+                                var_decl.name.clone(),
+                                (enum_name.clone(), enum_values),
+                            );
+                        }
                     }
                 } else {
                     // Parameter declaration
@@ -759,6 +804,31 @@ impl Translator {
                             ast::BaseType::Bool => {
                                 let value = self.eval_bool_expr(expr)?;
                                 self.context.add_bool_param(var_decl.name.clone(), value);
+                            }
+                            ast::BaseType::Enum(enum_name) => {
+                                // For now, parameters with enum types must be initialized
+                                // We'll look up the enum value in the definition
+                                if let ast::ExprKind::Ident(value_name) = &expr.kind {
+                                    let enum_values = self.context.enums.get(enum_name)
+                                        .ok_or_else(|| Error::message(
+                                            &format!("Undefined enum type: {}", enum_name),
+                                            var_decl.span,
+                                        ))?
+                                        .clone();
+                                    if let Some(pos) = enum_values.iter().position(|v| v == value_name) {
+                                        self.context.add_int_param(var_decl.name.clone(), (pos + 1) as i32);
+                                    } else {
+                                        return Err(Error::message(
+                                            &format!("Unknown enum value: {} for enum {}", value_name, enum_name),
+                                            expr.span,
+                                        ));
+                                    }
+                                } else {
+                                    return Err(Error::message(
+                                        "Enum parameter initialization must be an enum value identifier",
+                                        expr.span,
+                                    ));
+                                }
                             }
                         }
                     } else {
@@ -799,6 +869,13 @@ impl Translator {
                         // var 0..1: x or similar - treat as bool
                         let var = self.model.bool();
                         self.context.add_bool_var(var_decl.name.clone(), var);
+                    }
+                    ast::BaseType::Enum(_) => {
+                        // Constrained enum is not typical, but treat as error
+                        return Err(Error::message(
+                            "Enum types cannot be used in constrained form",
+                            var_decl.span,
+                        ));
                     }
                 }
             }
@@ -931,6 +1008,35 @@ impl Translator {
                                 self.context.add_bool_var_array(name.to_string(), vars);
                             }
                         }
+                        ast::BaseType::Enum(enum_name) => {
+                            // Treat enum array as integer array with domain 1..cardinality
+                            let enum_values = self.context.enums.get(enum_name)
+                                .ok_or_else(|| Error::message(
+                                    &format!("Undefined enum type: {}", enum_name),
+                                    Span::dummy(),
+                                ))?
+                                .clone();
+                            let cardinality = enum_values.len() as i32;
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.ints_2d(dimensions[0], dimensions[1], 1, cardinality);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_int_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.ints_3d(dimensions[0], dimensions[1], dimensions[2], 1, cardinality);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_int_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.ints(size, 1, cardinality);
+                                self.context.add_int_var_array(name.to_string(), vars);
+                            }
+                            // Track this array as enum for output formatting
+                            self.enum_var_mapping.insert(
+                                name.to_string(),
+                                (enum_name.clone(), enum_values),
+                            );
+                        }
                     }
                 }
                 ast::TypeInst::Basic { base_type, .. } => {
@@ -983,6 +1089,35 @@ impl Translator {
                                 self.context.add_bool_var_array(name.to_string(), vars);
                             }
                         }
+                        ast::BaseType::Enum(enum_name) => {
+                            // Treat enum array as integer array with domain 1..cardinality
+                            let enum_values = self.context.enums.get(enum_name)
+                                .ok_or_else(|| Error::message(
+                                    &format!("Undefined enum type: {}", enum_name),
+                                    Span::dummy(),
+                                ))?
+                                .clone();
+                            let cardinality = enum_values.len() as i32;
+                            if dimensions.len() == 2 {
+                                let vars_2d = self.model.ints_2d(dimensions[0], dimensions[1], 1, cardinality);
+                                let flattened = Self::flatten_2d(&vars_2d);
+                                self.context.add_int_var_array_2d(name.to_string(), vars_2d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else if dimensions.len() == 3 {
+                                let vars_3d = self.model.ints_3d(dimensions[0], dimensions[1], dimensions[2], 1, cardinality);
+                                let flattened = Self::flatten_3d(&vars_3d);
+                                self.context.add_int_var_array_3d(name.to_string(), vars_3d);
+                                self.context.add_int_var_array(name.to_string(), flattened);
+                            } else {
+                                let vars = self.model.ints(size, 1, cardinality);
+                                self.context.add_int_var_array(name.to_string(), vars);
+                            }
+                            // Track this array as enum for output formatting
+                            self.enum_var_mapping.insert(
+                                name.to_string(),
+                                (enum_name.clone(), enum_values),
+                            );
+                        }
                     }
                 }
                 _ => unreachable!(),
@@ -1025,6 +1160,34 @@ impl Translator {
                                             values.push(val);
                                         }
                                         self.context.add_bool_param_array(name.to_string(), values);
+                                    }
+                                    ast::BaseType::Enum(enum_name) => {
+                                        // Convert enum values to integers
+                                        let enum_values = self.context.enums.get(enum_name)
+                                            .ok_or_else(|| Error::message(
+                                                &format!("Undefined enum type: {}", enum_name),
+                                                init.span,
+                                            ))?
+                                            .clone();
+                                        let mut values = Vec::with_capacity(size);
+                                        for elem in elements.iter() {
+                                            if let ast::ExprKind::Ident(value_name) = &elem.kind {
+                                                if let Some(pos) = enum_values.iter().position(|v| v == value_name) {
+                                                    values.push((pos + 1) as i32);
+                                                } else {
+                                                    return Err(Error::message(
+                                                        &format!("Unknown enum value: {} for enum {}", value_name, enum_name),
+                                                        elem.span,
+                                                    ));
+                                                }
+                                            } else {
+                                                return Err(Error::message(
+                                                    "Enum array elements must be enum value identifiers",
+                                                    elem.span,
+                                                ));
+                                            }
+                                        }
+                                        self.context.add_int_param_array(name.to_string(), values);
                                     }
                                 }
                             }
@@ -1080,6 +1243,34 @@ impl Translator {
                                                 values.push(val);
                                             }
                                             self.context.add_bool_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Enum(enum_name) => {
+                                            // Convert enum values to integers for 2D array
+                                            let enum_values = self.context.enums.get(enum_name)
+                                                .ok_or_else(|| Error::message(
+                                                    &format!("Undefined enum type: {}", enum_name),
+                                                    values.span,
+                                                ))?
+                                                .clone();
+                                            let mut enum_values_mapped = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                if let ast::ExprKind::Ident(value_name) = &elem.kind {
+                                                    if let Some(pos) = enum_values.iter().position(|v| v == value_name) {
+                                                        enum_values_mapped.push((pos + 1) as i32);
+                                                    } else {
+                                                        return Err(Error::message(
+                                                            &format!("Unknown enum value: {} for enum {}", value_name, enum_name),
+                                                            elem.span,
+                                                        ));
+                                                    }
+                                                } else {
+                                                    return Err(Error::message(
+                                                        "Enum array elements must be enum value identifiers",
+                                                        elem.span,
+                                                    ));
+                                                }
+                                            }
+                                            self.context.add_int_param_array(name.to_string(), enum_values_mapped);
                                         }
                                     }
                                 }
@@ -1141,6 +1332,34 @@ impl Translator {
                                                 values.push(val);
                                             }
                                             self.context.add_bool_param_array(name.to_string(), values);
+                                        }
+                                        ast::BaseType::Enum(enum_name) => {
+                                            // Convert enum values to integers for 3D array
+                                            let enum_values = self.context.enums.get(enum_name)
+                                                .ok_or_else(|| Error::message(
+                                                    &format!("Undefined enum type: {}", enum_name),
+                                                    values.span,
+                                                ))?
+                                                .clone();
+                                            let mut enum_values_mapped = Vec::with_capacity(expected_len);
+                                            for elem in elements.iter() {
+                                                if let ast::ExprKind::Ident(value_name) = &elem.kind {
+                                                    if let Some(pos) = enum_values.iter().position(|v| v == value_name) {
+                                                        enum_values_mapped.push((pos + 1) as i32);
+                                                    } else {
+                                                        return Err(Error::message(
+                                                            &format!("Unknown enum value: {} for enum {}", value_name, enum_name),
+                                                            elem.span,
+                                                        ));
+                                                    }
+                                                } else {
+                                                    return Err(Error::message(
+                                                        "Enum array elements must be enum value identifiers",
+                                                        elem.span,
+                                                    ));
+                                                }
+                                            }
+                                            self.context.add_int_param_array(name.to_string(), enum_values_mapped);
                                         }
                                     }
                                 }

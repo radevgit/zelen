@@ -55,10 +55,55 @@ impl Parser {
     fn parse_item(&mut self) -> Result<Item> {
         match &self.current_token.kind {
             TokenKind::Constraint => self.parse_constraint(),
+            TokenKind::Enum => self.parse_enum_def(),
             TokenKind::Solve => self.parse_solve(),
             TokenKind::Output => self.parse_output(),
             _ => self.parse_var_decl(),
         }
+    }
+
+    /// Parse enum definition: `enum Color = {Red, Green, Blue};`
+    fn parse_enum_def(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        
+        self.expect(TokenKind::Enum)?;
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::Eq)?;
+        self.expect(TokenKind::LBrace)?;
+        
+        let mut values = Vec::new();
+        
+        // Parse comma-separated enum values
+        loop {
+            let value = self.expect_ident()?;
+            values.push(value);
+            
+            match &self.current_token.kind {
+                TokenKind::Comma => {
+                    self.advance()?;
+                    // Check if next is closing brace (trailing comma allowed)
+                    if self.current_token.kind == TokenKind::RBrace {
+                        break;
+                    }
+                }
+                TokenKind::RBrace => break,
+                _ => return Err(self.add_source_to_error(Error::message(
+                    "Expected comma or closing brace in enum definition",
+                    self.current_token.span,
+                ))),
+            }
+        }
+        
+        self.expect(TokenKind::RBrace)?;
+        self.expect(TokenKind::Semicolon)?;
+        
+        let end = self.current_token.span.end;
+        
+        Ok(Item::EnumDef(EnumDef {
+            name,
+            values,
+            span: Span::new(start, end),
+        }))
     }
     
     /// Parse variable declaration: `int: n = 5;` or `array[1..n] of var int: x;`
@@ -152,6 +197,12 @@ impl Parser {
                     base_type,
                     domain,
                 })
+            }
+            TokenKind::Ident(enum_name) => {
+                // Enum type: `var Color: x;`
+                let enum_name = enum_name.clone();
+                self.advance()?;
+                Ok(TypeInst::Basic { is_var, base_type: BaseType::Enum(enum_name) })
             }
             _ => {
                 Err(self.add_source_to_error(Error::unexpected_token(
