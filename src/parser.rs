@@ -55,10 +55,55 @@ impl Parser {
     fn parse_item(&mut self) -> Result<Item> {
         match &self.current_token.kind {
             TokenKind::Constraint => self.parse_constraint(),
+            TokenKind::Enum => self.parse_enum_def(),
             TokenKind::Solve => self.parse_solve(),
             TokenKind::Output => self.parse_output(),
             _ => self.parse_var_decl(),
         }
+    }
+
+    /// Parse enum definition: `enum Color = {Red, Green, Blue};`
+    fn parse_enum_def(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        
+        self.expect(TokenKind::Enum)?;
+        let name = self.expect_ident()?;
+        self.expect(TokenKind::Eq)?;
+        self.expect(TokenKind::LBrace)?;
+        
+        let mut values = Vec::new();
+        
+        // Parse comma-separated enum values
+        loop {
+            let value = self.expect_ident()?;
+            values.push(value);
+            
+            match &self.current_token.kind {
+                TokenKind::Comma => {
+                    self.advance()?;
+                    // Check if next is closing brace (trailing comma allowed)
+                    if self.current_token.kind == TokenKind::RBrace {
+                        break;
+                    }
+                }
+                TokenKind::RBrace => break,
+                _ => return Err(self.add_source_to_error(Error::message(
+                    "Expected comma or closing brace in enum definition",
+                    self.current_token.span,
+                ))),
+            }
+        }
+        
+        self.expect(TokenKind::RBrace)?;
+        self.expect(TokenKind::Semicolon)?;
+        
+        let end = self.current_token.span.end;
+        
+        Ok(Item::EnumDef(EnumDef {
+            name,
+            values,
+            span: Span::new(start, end),
+        }))
     }
     
     /// Parse variable declaration: `int: n = 5;` or `array[1..n] of var int: x;`
@@ -153,6 +198,12 @@ impl Parser {
                     domain,
                 })
             }
+            TokenKind::Ident(enum_name) => {
+                // Enum type: `var Color: x;`
+                let enum_name = enum_name.clone();
+                self.advance()?;
+                Ok(TypeInst::Basic { is_var, base_type: BaseType::Enum(enum_name) })
+            }
             _ => {
                 Err(self.add_source_to_error(Error::unexpected_token(
                     "type (bool, int, float, or constrained type)",
@@ -173,42 +224,57 @@ impl Parser {
         }
     }
     
-    /// Parse array type: `array[1..n] of var int` or `array[int] of int`
+    /// Parse array type: `array[1..n] of var int`, `array[1..n, 1..m] of var int`, etc.
     fn parse_array_type_inst(&mut self) -> Result<TypeInst> {
         self.expect(TokenKind::Array)?;
         self.expect(TokenKind::LBracket)?;
         
-        // Handle implicit index sets: array[int], array[bool], array[float]
-        let index_set = match &self.current_token.kind {
-            TokenKind::Int => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Int),
-                    span,
+        // Parse one or more index sets (comma-separated for multi-dimensional)
+        let mut index_sets = vec![];
+        
+        loop {
+            // Handle implicit index sets: array[int], array[bool], array[float]
+            let index_set = match &self.current_token.kind {
+                TokenKind::Int => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Int),
+                        span,
+                    }
                 }
-            }
-            TokenKind::Bool => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Bool),
-                    span,
+                TokenKind::Bool => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Bool),
+                        span,
+                    }
                 }
-            }
-            TokenKind::Float => {
-                let span = self.current_token.span;
-                self.advance()?;
-                Expr {
-                    kind: ExprKind::ImplicitIndexSet(BaseType::Float),
-                    span,
+                TokenKind::Float => {
+                    let span = self.current_token.span;
+                    self.advance()?;
+                    Expr {
+                        kind: ExprKind::ImplicitIndexSet(BaseType::Float),
+                        span,
+                    }
                 }
+                _ => {
+                    // Regular index set expression: array[1..n] or array[1..n, 1..m]
+                    self.parse_expr()?
+                }
+            };
+            
+            index_sets.push(index_set);
+            
+            // Check for comma (multi-dimensional) or bracket (end)
+            if self.current_token.kind == TokenKind::Comma {
+                self.advance()?;
+                continue;
+            } else {
+                break;
             }
-            _ => {
-                // Regular index set expression: array[1..n]
-                self.parse_expr()?
-            }
-        };
+        }
         
         self.expect(TokenKind::RBracket)?;
         self.expect(TokenKind::Of)?;
@@ -216,7 +282,7 @@ impl Parser {
         let element_type = Box::new(self.parse_type_inst()?);
         
         Ok(TypeInst::Array {
-            index_set,
+            index_sets,
             element_type,
         })
     }
@@ -243,10 +309,19 @@ impl Parser {
         let start = self.current_token.span.start;
         self.expect(TokenKind::Solve)?;
         
+        // Check for search annotation: :: int_search(...) or :: complete/incomplete
+        let search_option = if self.current_token.kind == TokenKind::ColonColon {
+            self.advance()?;
+            Some(self.parse_search_annotation()?)
+        } else {
+            None
+        };
+        
         let solve = match &self.current_token.kind {
             TokenKind::Satisfy => {
                 self.advance()?;
                 Solve::Satisfy {
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -255,6 +330,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Solve::Minimize {
                     expr,
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -263,6 +339,7 @@ impl Parser {
                 let expr = self.parse_expr()?;
                 Solve::Maximize {
                     expr,
+                    search_option,
                     span: Span::new(start, self.current_token.span.end),
                 }
             }
@@ -278,6 +355,87 @@ impl Parser {
         self.expect(TokenKind::Semicolon)?;
         
         Ok(Item::Solve(solve))
+    }
+    
+    /// Parse search annotation: int_search(...) and extract complete/incomplete option
+    fn parse_search_annotation(&mut self) -> Result<SearchOption> {
+        // We parse the annotation but only extract complete/incomplete
+        // We ignore variable selection and value selection strategies
+        
+        // Expected format: int_search(variables, var_select, val_select, complete/incomplete)
+        // or just: complete or incomplete
+        
+        if let TokenKind::Ident(name) = &self.current_token.kind {
+            let name_str = name.clone();
+            
+            if name_str == "complete" {
+                self.advance()?;
+                return Ok(SearchOption::Complete);
+            } else if name_str == "incomplete" {
+                self.advance()?;
+                return Ok(SearchOption::Incomplete);
+            } else if name_str == "int_search" || name_str == "bool_search" || name_str == "float_search" {
+                // Parse function call: int_search(args...)
+                self.advance()?;
+                self.expect(TokenKind::LParen)?;
+                
+                // Parse arguments: skip first 3 (variables, var_select, val_select)
+                let mut paren_depth = 1;
+                let mut arg_count = 0;
+                
+                while paren_depth > 0 && self.current_token.kind != TokenKind::Eof {
+                    match &self.current_token.kind {
+                        TokenKind::LParen => paren_depth += 1,
+                        TokenKind::RParen => paren_depth -= 1,
+                        TokenKind::Comma if paren_depth == 1 => arg_count += 1,
+                        _ => {}
+                    }
+                    
+                    // Check the 4th argument (index 3) for complete/incomplete
+                    if paren_depth == 1 && arg_count == 3 {
+                        if let TokenKind::Ident(opt) = &self.current_token.kind {
+                            let opt_str = opt.clone();
+                            if opt_str == "complete" {
+                                // Consume the rest of the annotation
+                                while self.current_token.kind != TokenKind::RParen && 
+                                      self.current_token.kind != TokenKind::Eof {
+                                    self.advance()?;
+                                }
+                                if self.current_token.kind == TokenKind::RParen {
+                                    self.advance()?;
+                                }
+                                return Ok(SearchOption::Complete);
+                            } else if opt_str == "incomplete" {
+                                // Consume the rest of the annotation
+                                while self.current_token.kind != TokenKind::RParen && 
+                                      self.current_token.kind != TokenKind::Eof {
+                                    self.advance()?;
+                                }
+                                if self.current_token.kind == TokenKind::RParen {
+                                    self.advance()?;
+                                }
+                                return Ok(SearchOption::Incomplete);
+                            }
+                        }
+                    }
+                    
+                    self.advance()?;
+                }
+                
+                // Default to complete if not specified
+                return Ok(SearchOption::Complete);
+            }
+        }
+        
+        // If it's not recognized, skip to next valid token and default to complete
+        while self.current_token.kind != TokenKind::Satisfy && 
+              self.current_token.kind != TokenKind::Minimize &&
+              self.current_token.kind != TokenKind::Maximize &&
+              self.current_token.kind != TokenKind::Eof {
+            self.advance()?;
+        }
+        
+        Ok(SearchOption::Complete)
     }
     
     /// Parse output item: `output ["x = ", show(x)];`
@@ -413,9 +571,20 @@ impl Parser {
         loop {
             match &self.current_token.kind {
                 TokenKind::LBracket => {
-                    // Array access
+                    // Array access (possibly multi-dimensional: grid[i,j] or grid[i,j,k])
                     self.advance()?;
-                    let index = self.parse_expr()?;
+                    let mut indices = vec![];
+                    
+                    loop {
+                        indices.push(self.parse_expr()?);
+                        if self.current_token.kind == TokenKind::Comma {
+                            self.advance()?;
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+                    
                     self.expect(TokenKind::RBracket)?;
                     
                     let end = self.current_token.span.end;
@@ -423,7 +592,7 @@ impl Parser {
                         span: Span::new(expr.span.start, end),
                         kind: ExprKind::ArrayAccess {
                             array: Box::new(expr),
-                            index: Box::new(index),
+                            indices,
                         },
                     };
                 }
@@ -433,43 +602,84 @@ impl Parser {
                         let name = name.clone();
                         self.advance()?;
                         
-                        let mut args = Vec::new();
-                        if self.current_token.kind != TokenKind::RParen {
-                            loop {
-                                // Check for generator call: forall(i in 1..n)(expr)
-                                if self.is_generator_start() {
-                                    let generators = self.parse_generators()?;
-                                    self.expect(TokenKind::RParen)?;
-                                    self.expect(TokenKind::LParen)?;
-                                    let body = self.parse_expr()?;
-                                    self.expect(TokenKind::RParen)?;
+                        // Special handling for array2d and array3d
+                        if name == "array2d" {
+                            let row_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let col_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let values = self.parse_expr()?;
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Array2D {
+                                    row_range: Box::new(row_range),
+                                    col_range: Box::new(col_range),
+                                    values: Box::new(values),
+                                },
+                            };
+                        } else if name == "array3d" {
+                            let r1_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let r2_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let r3_range = self.parse_expr()?;
+                            self.expect(TokenKind::Comma)?;
+                            let values = self.parse_expr()?;
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Array3D {
+                                    r1_range: Box::new(r1_range),
+                                    r2_range: Box::new(r2_range),
+                                    r3_range: Box::new(r3_range),
+                                    values: Box::new(values),
+                                },
+                            };
+                        } else {
+                            // Regular function call
+                            let mut args = Vec::new();
+                            if self.current_token.kind != TokenKind::RParen {
+                                loop {
+                                    // Check for generator call: forall(i in 1..n)(expr)
+                                    if self.is_generator_start() {
+                                        let generators = self.parse_generators()?;
+                                        self.expect(TokenKind::RParen)?;
+                                        self.expect(TokenKind::LParen)?;
+                                        let body = self.parse_expr()?;
+                                        self.expect(TokenKind::RParen)?;
+                                        
+                                        let end = self.current_token.span.end;
+                                        return Ok(Expr {
+                                            span: Span::new(expr.span.start, end),
+                                            kind: ExprKind::GenCall {
+                                                name,
+                                                generators,
+                                                body: Box::new(body),
+                                            },
+                                        });
+                                    }
                                     
-                                    let end = self.current_token.span.end;
-                                    return Ok(Expr {
-                                        span: Span::new(expr.span.start, end),
-                                        kind: ExprKind::GenCall {
-                                            name,
-                                            generators,
-                                            body: Box::new(body),
-                                        },
-                                    });
+                                    args.push(self.parse_expr()?);
+                                    if self.current_token.kind != TokenKind::Comma {
+                                        break;
+                                    }
+                                    self.advance()?;
                                 }
-                                
-                                args.push(self.parse_expr()?);
-                                if self.current_token.kind != TokenKind::Comma {
-                                    break;
-                                }
-                                self.advance()?;
                             }
+                            
+                            self.expect(TokenKind::RParen)?;
+                            
+                            let end = self.current_token.span.end;
+                            expr = Expr {
+                                span: Span::new(expr.span.start, end),
+                                kind: ExprKind::Call { name, args },
+                            };
                         }
-                        
-                        self.expect(TokenKind::RParen)?;
-                        
-                        let end = self.current_token.span.end;
-                        expr = Expr {
-                            span: Span::new(expr.span.start, end),
-                            kind: ExprKind::Call { name, args },
-                        };
                     } else {
                         break;
                     }
@@ -791,8 +1001,9 @@ mod tests {
         
         // Verify it's an array with implicit index set
         if let Item::VarDecl(var_decl) = &model.items[0] {
-            if let TypeInst::Array { index_set, .. } = &var_decl.type_inst {
-                assert!(matches!(index_set.kind, ExprKind::ImplicitIndexSet(BaseType::Int)));
+            if let TypeInst::Array { index_sets, .. } = &var_decl.type_inst {
+                assert_eq!(index_sets.len(), 1);
+                assert!(matches!(index_sets[0].kind, ExprKind::ImplicitIndexSet(BaseType::Int)));
             } else {
                 panic!("Expected array type");
             }

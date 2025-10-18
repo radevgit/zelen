@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // Pure Selen test: Modulo with two variables
 // This shows the issue directly in Selen API without MiniZinc layer
 

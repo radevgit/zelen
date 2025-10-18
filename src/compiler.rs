@@ -203,8 +203,8 @@ impl Compiler {
                 );
             }
 
-            TypeInst::Array { index_set, element_type } => {
-                self.compile_array_decl(&var_decl.name, index_set, element_type, &var_decl.expr)?;
+            TypeInst::Array { index_sets, element_type } => {
+                self.compile_array_decl(&var_decl.name, index_sets, element_type, &var_decl.expr)?;
             }
         }
 
@@ -214,7 +214,7 @@ impl Compiler {
     fn compile_array_decl(
         &mut self,
         name: &str,
-        index_set: &Expr,
+        index_sets: &[Expr],
         element_type: &TypeInst,
         init_expr: &Option<Expr>,
     ) -> Result<()> {
@@ -257,7 +257,17 @@ impl Compiler {
                 _ => unreachable!(),
             };
 
-            let size_code = self.compile_index_set_size(index_set)?;
+            // For multi-dimensional arrays, compute total size as product of all dimensions
+            let mut size_code = String::new();
+            for (i, index_set) in index_sets.iter().enumerate() {
+                let dim_size = self.compile_index_set_size(index_set)?;
+                if i == 0 {
+                    size_code = dim_size;
+                } else {
+                    size_code = format!("({}) * ({})", size_code, dim_size);
+                }
+            }
+            
             self.emit_line(&format!(
                 "let {} = model.new_int_var_array({}, {});",
                 rust_name, size_code, domain_code
@@ -485,9 +495,20 @@ impl Compiler {
                 };
                 Ok(format!("({}{})", op_str, inner_code))
             }
-            ExprKind::ArrayAccess { array, index } => {
+            ExprKind::ArrayAccess { array, indices } => {
                 let array_code = self.compile_expr(array)?;
-                let index_code = self.compile_expr(index)?;
+                
+                // For now, handle 1D arrays only  in code generation mode
+                // Multi-dimensional will be handled separately in translator
+                if indices.len() != 1 {
+                    return Err(Error::unsupported_feature(
+                        "Multi-dimensional array access in code generation",
+                        "Phase 2",
+                        Span::dummy(),
+                    ));
+                }
+                
+                let index_code = self.compile_expr(&indices[0])?;
                 Ok(format!("{}[{} as usize - 1]", array_code, index_code))
             }
             ExprKind::Call { name, args } => {

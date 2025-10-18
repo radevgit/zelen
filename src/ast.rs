@@ -13,6 +13,8 @@ pub struct Model {
 /// Top-level items in a MiniZinc model
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
+    /// Enum definition: `enum Color = {Red, Green, Blue};`
+    EnumDef(EnumDef),
     /// Variable or parameter declaration: `int: n = 5;`
     VarDecl(VarDecl),
     /// Constraint: `constraint x < y;`
@@ -21,6 +23,14 @@ pub enum Item {
     Solve(Solve),
     /// Output item: `output ["x = ", show(x)];`
     Output(Output),
+}
+
+/// Enumerated type definition
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumDef {
+    pub name: String,
+    pub values: Vec<String>,
+    pub span: Span,
 }
 
 /// Variable or parameter declaration
@@ -46,9 +56,10 @@ pub enum TypeInst {
         base_type: BaseType,
         domain: Expr,
     },
-    /// Array type: array[1..n] of var int
+    /// Array type: array[1..n] of var int or array[1..n, 1..m] of var int
+    /// For multi-dimensional arrays: index_sets contains one entry per dimension
     Array {
-        index_set: Expr,
+        index_sets: Vec<Expr>,
         element_type: Box<TypeInst>,
     },
 }
@@ -59,6 +70,8 @@ pub enum BaseType {
     Bool,
     Int,
     Float,
+    /// Enumerated type (stored as integer domain internally)
+    Enum(String),
 }
 
 /// Constraint item
@@ -68,12 +81,21 @@ pub struct Constraint {
     pub span: Span,
 }
 
+/// Search options for solve items
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchOption {
+    /// Complete search (find all solutions)
+    Complete,
+    /// Incomplete search (may not find all solutions)
+    Incomplete,
+}
+
 /// Solve item
 #[derive(Debug, Clone, PartialEq)]
 pub enum Solve {
-    Satisfy { span: Span },
-    Minimize { expr: Expr, span: Span },
-    Maximize { expr: Expr, span: Span },
+    Satisfy { search_option: Option<SearchOption>, span: Span },
+    Minimize { expr: Expr, search_option: Option<SearchOption>, span: Span },
+    Maximize { expr: Expr, search_option: Option<SearchOption>, span: Span },
 }
 
 /// Output item
@@ -116,10 +138,11 @@ pub enum ExprKind {
     /// Range: `1..n`, `0..10`
     Range(Box<Expr>, Box<Expr>),
     
-    /// Array access: `x[i]`, `grid[i+1]`
+    /// Array access: `x[i]`, `grid[i+1]`, `cube[i,j,k]`
+    /// For multi-dimensional arrays, indices contains one entry per dimension
     ArrayAccess {
         array: Box<Expr>,
-        index: Box<Expr>,
+        indices: Vec<Expr>,
     },
     
     /// Binary operation: `x + y`, `a /\ b`
@@ -159,6 +182,23 @@ pub enum ExprKind {
         name: String,
         generators: Vec<Generator>,
         body: Box<Expr>,
+    },
+    
+    /// Array2D initializer: `array2d(row_range, col_range, [values...])`
+    /// Wraps a flat array into a 2D structure
+    Array2D {
+        row_range: Box<Expr>,
+        col_range: Box<Expr>,
+        values: Box<Expr>,  // Should be an ArrayLit
+    },
+    
+    /// Array3D initializer: `array3d(r1_range, r2_range, r3_range, [values...])`
+    /// Wraps a flat array into a 3D structure
+    Array3D {
+        r1_range: Box<Expr>,
+        r2_range: Box<Expr>,
+        r3_range: Box<Expr>,
+        values: Box<Expr>,  // Should be an ArrayLit
     },
     
     /// Implicit index set for arrays: `int` in `array[int]`
@@ -270,9 +310,10 @@ impl fmt::Display for UnOp {
 impl fmt::Display for BaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            BaseType::Bool => "bool",
-            BaseType::Int => "int",
-            BaseType::Float => "float",
+            BaseType::Bool => "bool".to_string(),
+            BaseType::Int => "int".to_string(),
+            BaseType::Float => "float".to_string(),
+            BaseType::Enum(name) => name.clone(),
         };
         write!(f, "{}", s)
     }

@@ -31,19 +31,31 @@
 - **Forall loops (comprehensions)**: `forall(i in 1..n)(constraint)` expands to multiple constraints - **Phase 4**
 - **Nested forall loops**: `forall(i in 1..n, j in i+1..n)(constraint)` for complex constraint patterns - **Phase 4**
 - **Array initialization expressions**: `array[1..5] of int: costs = [10, 20, 30, 40, 50]` - **Phase 4**
+- **Output formatting**: `output ["x = ", show(x), "\n"];` with show() function and string concatenation - **Phase 4**
+- **Search annotations**: `solve :: int_search(..., complete) satisfy;` - parsed, strategies ignored - **Phase 4.5**
+- **Multi-dimensional array initializers**: `array2d(1..n, 1..m, values)` and `array3d(1..n, 1..m, 1..k, values)` - **Phase 4.5**
+- **Range expressions in array initializers**: Supports `array2d(1..n, 1..m, [...])` with range parameters - **Phase 4.5**
 - Direct execution and solution extraction
-- 52 unit tests passing, 12 working examples
+- 50+ unit tests passing, 14 integration tests passing
 
-### ❌ What's Missing (Phase 4+)
+### ✅ Phase 4 Complete: Output Formatting
+- ✅ Output formatting with show() function
+- ✅ String concatenation in output statements
+- ✅ Escape sequence processing (\n, \t, \r, \\, \")
+- ✅ Multiple output statements
+- ✅ Automatic fallback to default printing if no output items
+
+### ❌ What's Missing (Phase 5+)
 - Set types and operations
-- Output formatting
 - String types and operations
+- Enumerated types
 
 ### 📊 Test Results
 ```
-✅ 52/52 unit tests passing (up from 48)
-✅ Parser handles 6/7 examples (comprehensions Phase 4)
-✅ Translator solves simple N-Queens (column constraints)
+✅ 50/50 unit tests passing (translator tests)
+✅ 14/14 integration tests passing (2D grid, 3D arrays, variable indexing, output formatting)
+✅ Parser handles all examples
+✅ Translator solves all test models
 ✅ Boolean logic fully working (AND, OR, NOT, IMPLIES, IFF, XOR)
 ✅ Array aggregates working (sum, min, max, product)
 ✅ Element constraint working with variable indices and 1-based arrays
@@ -52,9 +64,12 @@
 ✅ XOR operator implemented
 ✅ Forall loops (comprehensions) with single and multiple generators
 ✅ Array initialization expressions (parameter arrays with literal values)
+✅ Output formatting with show() function (NEW - Phase 4)
 ✅ Optimization working (minimize, maximize)
-✅ Examples: solve_nqueens, queens4, simple_constraints, compiler_demo, 
-            bool_float_demo, boolean_logic_demo, phase2_demo, phase3_demo, modulo_demo, test_forall
+✅ Multiple output statements supported
+✅ Escape sequence processing in output strings
+✅ array2d() and array3d() initializers with range expressions (NEW - Phase 4.5)
+✅ Proper enum-based error handling for array size mismatches (NEW - Phase 4.5)
 ```
 
 ## Overview
@@ -346,9 +361,8 @@ solve maximize profit;            % ✅ Application calls model.minimize/maximiz
 solve minimize sum(costs);        % ✅ Aggregate expressions supported
 solve maximize max(profits);      % ✅ Complex objectives work
 
-% With annotations - ❌ Phase 3
-solve :: int_search(x, input_order, indomain_min) 
-      satisfy;
+% With annotations - ✅ PARSED (Phase 4.5 - parsing only)
+solve :: int_search(x, input_order, indomain_min, complete) satisfy;
 ```
 
 **Status:**
@@ -356,31 +370,50 @@ solve :: int_search(x, input_order, indomain_min)
 - ✅ `solve minimize expr` → Stores ObjectiveType::Minimize and objective VarId
 - ✅ `solve maximize expr` → Stores ObjectiveType::Maximize and objective VarId
 - ✅ Applications call `model.minimize(var)` or `model.maximize(var)` as needed
-- ❌ Search annotations → Phase 3
+- ✅ **Search annotations parsing** → Parsed but strategies ignored (Phase 4.5)
+  - ✅ Extracts `complete`/`incomplete` search option
+  - ✅ Ignores variable selection strategies (first_fail, anti_first_fail, etc.)
+  - ✅ Ignores value selection strategies (indomain_min, indomain_max, etc.)
+  - ⚠️ Search option stored but not yet used in solver
 
 ### 1.5 Output Items
 
 ```minizinc
-% Output items - ❌ PARSED but IGNORED
+% Output items - ✅ FULLY IMPLEMENTED (Phase 4)
 output ["x = ", show(x), "\n"];
 output ["Solution: ", show(queens), "\n"];
 output ["The value is \(x)\n"];
 ```
 
 **Status:**
-- ✅ Parsed (doesn't cause errors)
-- ❌ Not used (solution extraction done via API)
-- ❌ Output formatting → Phase 2
+- ✅ Parsed and collected during translation
+- ✅ Formatted using show() function for variables and arrays
+- ✅ String concatenation support
+- ✅ Escape sequence processing (\n, \t, \r, \\, \")
+- ✅ Automatic integration with main.rs
+- ✅ Fallback to default printing when no output items exist
 
-**Current Approach:**
-Solutions are accessed programmatically:
+**Implementation:**
+- Output items stored as `Vec<ast::Expr>` in `TranslatedModel`
+- `format_output()` method evaluates expressions during solution display
+- Supports: string literals, show() function, variable/array references, escape sequences
+- Works in main.rs through `print_solution()` function
+
+**Example Usage:**
 ```rust
-let translated = Translator::translate_with_vars(&ast)?;
+let code = r#"
+    var 1..10: x;
+    constraint x = 5;
+    solve satisfy;
+    output ["x = ", show(x), "\n"];
+"#;
+
+let ast = zelen::parse(code)?;
+let translated = zelen::Translator::translate_with_vars(&ast)?;
 match translated.model.solve() {
     Ok(solution) => {
-        if let Some(&x) = translated.int_vars.get("x") {
-            println!("x = {:?}", solution[x]);
-        }
+        // Output: x = 5
+        // (formatted automatically from output statement)
     }
 }
 ```
@@ -540,34 +573,107 @@ constraint all_valid == forall(checks);      % ✅ Can be used in constraints
 % NOTE: This is the aggregate function, not forall comprehensions (Phase 4)
 ```
 
-## Phase 4: Future Features
+## Phase 4: Output Formatting (COMPLETE ✅)
 
-### 4.1 Set Comprehensions
+### 4.1 Output Statements ✅
+```minizinc
+% Output formatting - ✅ IMPLEMENTED
+output ["x = ", show(x), "\n"];
+output ["Solution: ", show(queens), "\n"];
+output ["Result:\t", show(value), "\r\n"];
+```
+
+**Status:**
+- ✅ Output items collected during translation
+- ✅ String literals with escape sequences
+- ✅ show() function for variables and arrays
+- ✅ String concatenation via array syntax
+- ✅ Multiple output statements
+- ✅ Automatic formatting in main.rs
+- ✅ Fallback to default printing if no output items
+
+**Implementation Details:**
+- Output expressions stored in `TranslatedModel.output_items`
+- `format_output(&solution)` evaluates expressions post-solve
+- Handles: integers, booleans (0/1), floats, arrays
+- Escape sequences: `\n`, `\t`, `\r`, `\\`, `\"`
+- Works with 1-based array indices (automatic conversion)
+
+### 4.2 Advanced Output Features (Not Yet Implemented)
+```minizinc
+% Array element output
+output ["arr[", show(i), "] = ", show(arr[i]), "\n"];  % ✅ Constant indices only
+
+% Set comprehensions in output - ❌ Phase 5
+output [show(x[i]) ++ " " | i in 1..n];
+
+% Complex string formatting - ❌ Phase 5
+output ["Value: \(x div 10).\(x mod 10)\n"];
+```
+
+## Phase 4.5: Search Annotations (PARSING ONLY ✅)
+
+### 4.5 Search Annotations ✅
+```minizinc
+% Search annotations - ✅ PARSED
+solve :: int_search(variables, var_select, val_select, search_option) satisfy;
+solve :: int_search(x, first_fail, indomain_min, complete) minimize cost;
+```
+
+**Status:**
+- ✅ Parsed and recognized during translation
+- ✅ Extracts `complete` or `incomplete` search option
+- ✅ Ignores variable selection strategies (first_fail, anti_first_fail, occurrence, etc.)
+- ✅ Ignores value selection strategies (indomain_min, indomain_max, indomain_split, etc.)
+- ⚠️ Search option stored in TranslatedModel but not yet used by solver
+
+**Implementation Details:**
+- Lexer recognizes `::` token (ColonColon)
+- Parser detects search annotations and skips non-essential parts
+- Extracts final argument: `complete` or `incomplete`
+- Defaults to `complete` if not specified
+- Allows more Hakank MiniZinc files to parse successfully
+
+## Phase 5: Future Features
+
+### 5.1 Array Functions in Initializers (HIGH PRIORITY - EASY WIN!)
+
+**Status**: ❌ Parser support missing, but translator infrastructure exists
+
+```minizinc
+% array2d() function - wraps flat list into 2D array
+array[1..n, 1..m] of int: grid = array2d(1..n, 1..m, [1,2,3,4,5,6]);
+
+% array3d() function - wraps flat list into 3D array  
+array[1..n, 1..m, 1..k] of int: cube = array3d(1..n, 1..m, 1..k, [values...]);
+```
+
+**Why this is important**:
+- Many Hakank .dzn data files use `array2d()` to initialize 2D arrays
+- We already have `int_var_arrays_2d`, `int_var_arrays_3d` etc. in translator
+- Just need to add parser support for function calls in array initializers
+- Unlocks all arbitrage_loops* examples and many others
+
+**Implementation strategy**:
+- Recognize `array2d(...)` and `array3d(...)` function calls in expressions
+- Flatten the provided 1D array according to the index ranges
+- Store in appropriate 2D/3D array structure
+
+### 5.2 Set Comprehensions
 ```minizinc
 set of int: evens = {2*i | i in 1..n};
 ```
 
-### 4.2 Forall/Exists Loops (Comprehensions)
+### 5.3 Enumerated Types
 ```minizinc
-% Create constraints for each element
-constraint forall(i in 1..n) (x[i] < y[i]);
-constraint exists(i in 1..n) (x[i] > 10);
+enum Color = {Red, Green, Blue};
+var Color: my_color;
 ```
 
-### 4.3 Annotations
+### 5.4 Advanced String Operations
 ```minizinc
-% Search annotations
-solve :: int_search(x, first_fail, indomain_min)
-      satisfy;
-
-% Variable annotations
-var 1..n: x :: is_defined_var;
-```
-
-### 4.4 Option Types
-```minizinc
-var opt 1..n: maybe_value;
-constraint occurs(maybe_value) -> (deopt(maybe_value) > 5);
+output ["Value: \(x)\n"];  % String interpolation
+output [show(x) ++ " " ++ show(y)];  % String concatenation
 ```
 
 ## Mapping to Selen (Actual Implementation)
@@ -690,26 +796,33 @@ Standard CSP problems:
 - ✅ Error reporting - Line/column with caret pointers
 - ⚠️ Basic type checker - Minimal (type inference TODO)
 
-### Phase 1: Translator & Execution ✅
+### Phase 1-3: Translator & Execution ✅
 - ✅ AST → Selen Model translator (not code generation!)
 - ✅ Variable mapping - HashMap<String, VarId>
-- ✅ Constraint translation - Binary ops and alldifferent
-- ✅ Array handling - Vec<VarId> arrays
-- ✅ Solve items - Basic satisfy support
+- ✅ Constraint translation - Binary ops, alldifferent, element constraint
+- ✅ Array handling - Vec<VarId> arrays with multi-dimensional support
+- ✅ Solve items - Satisfy, minimize, maximize
 - ✅ Solution extraction - TranslatedModel with variable mappings
 
-### Phase 1: Constraints ✅ (Partial)
+### Phase 1-3: Constraints ✅
 - ✅ `alldifferent` / `all_different`
 - ✅ Binary comparison constraints (`<`, `<=`, `>`, `>=`, `==`, `!=`)
-- ✅ Arithmetic in constraints (`+`, `-`, `*`, `/`)
-- ❌ `element` constraint - Phase 2
-- ❌ `cumulative` - Phase 2
-- ❌ `table` constraint - Phase 2
-- ❌ Array operations (`sum`, `product`, etc.) - Phase 2
+- ✅ Arithmetic in constraints (`+`, `-`, `*`, `/`, `mod`)
+- ✅ `element` constraint with variable indices
+- ✅ Array operations (`sum`, `min`, `max`, `product`)
+- ✅ Global aggregates (`count`, `exists`, `forall`)
+- ❌ Additional global constraints - Phase 5
 
-### Phase 1: Testing & Examples ✅
-- ✅ Unit tests - 22 tests passing
-- ✅ Integration tests - Parser demo, solver demos
+### Phase 4: Output Formatting ✅
+- ✅ Output items collection during translation
+- ✅ Output formatting engine with show() function
+- ✅ String concatenation and escape sequences
+- ✅ Integration with main.rs print_solution()
+- ✅ Fallback to default printing
+
+### Phase 1-4: Testing & Examples ✅
+- ✅ 50 unit tests (translator tests)
+- ✅ 14 integration tests (2D grid, 3D arrays, variable indexing, output formatting)
 - ✅ Example programs:
   - ✅ `solve_nqueens.rs` - Shows array solution extraction
   - ✅ `queens4.rs` - Visual chessboard output
@@ -807,42 +920,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Success Metrics
 
-### Phase 1 Status ✅ (MVP Complete)
-- ✅ Can parse N-Queens (column constraints only)
-- ✅ Can translate and solve directly (no code generation!)
-- ✅ Can handle arrays with variable domains
-- ✅ Can evaluate parameter expressions
+### Phase 1-4.5 Status ✅ (Phase 4.5 Complete - Parsing)
+- ✅ Parse MiniZinc directly
+- ✅ Build Selen Model objects (not strings!)
+- ✅ Support multi-dimensional arrays with variable indexing
+- ✅ Execute immediately
+- ✅ Extract solution values
+- ✅ Format output with show() statements
+- ✅ Parse search annotations (complete/incomplete)
+- ✅ Access solve statistics
+- ✅ Handle arrays with variable domains
+- ✅ Evaluate parameter expressions
 - ✅ Error messages are clear with source locations
 - ✅ Architecture is solid and extensible
-- ⚠️ Sudoku requires array indexing (Phase 2)
-- ⚠️ Full N-Queens requires forall loops (Phase 2)
-- ⚠️ Magic Square requires array operations (Phase 2)
 
 ### Quality Metrics Achieved:
-- **Tests Passing**: 22/22 unit tests ✅
+- **Tests Passing**: 64/64 tests (50 unit + 14 integration) ✅
 - **Error Handling**: Clear errors with line/column/caret ✅
 - **Architecture**: Direct execution (no string generation) ✅
 - **Examples**: 5 working examples demonstrating features ✅
 - **Maintainability**: Clean separation (parser/translator/examples) ✅
+- **Output Support**: Full output formatting with show() and escapes ✅
 
 ### What Works:
 1. ✅ Integer variables with domains
-2. ✅ Integer arrays with constrained elements
-3. ✅ Parameters with compile-time evaluation
-4. ✅ Binary comparison constraints
-5. ✅ Arithmetic expressions in constraints
-6. ✅ Alldifferent global constraint
-7. ✅ Direct model execution
-8. ✅ Solution value extraction
+2. ✅ Boolean variables with operations
+3. ✅ Float variables and operations
+4. ✅ Integer, boolean, and float arrays
+5. ✅ Multi-dimensional arrays (2D, 3D)
+6. ✅ Variable array indexing with element constraint
+7. ✅ Parameters with compile-time evaluation
+8. ✅ Binary comparison constraints
+9. ✅ Arithmetic expressions in constraints
+10. ✅ Boolean logical operations (AND, OR, NOT, IMPLIES, XOR)
+11. ✅ Alldifferent global constraint
+12. ✅ Array aggregates (sum, min, max, product)
+13. ✅ Count, exists, forall aggregates
+14. ✅ Modulo and XOR operators
+15. ✅ Forall loops (comprehensions)
+16. ✅ Array initialization expressions
+17. ✅ Optimization (minimize, maximize)
+18. ✅ Output formatting with show() function
+19. ✅ Direct model execution
+20. ✅ Solution value extraction
 
-### Next Steps (Phase 2):
-1. ❌ Array indexing in constraints (`x[i]`)
-2. ❌ Forall loops for diagonal constraints
-3. ❌ Boolean variables and operations
-4. ❌ Array aggregate functions (`sum`, `product`, etc.)
-5. ❌ Element constraint
-6. ❌ Optimization (minimize/maximize)
-7. ❌ Output item formatting
+### Next Steps (Phase 5):
+1. ❌ Use search_option (complete vs incomplete) to control Selen search
+2. ❌ Array comprehensions in constraints: `[expr | i in range]`
+3. ❌ Include directives for library files
+4. ❌ Set types and operations
+5. ❌ Enumerated types
+6. ❌ String interpolation in output
+7. ❌ Let expressions
+8. ❌ User-defined predicates
 
 ## References
 
@@ -905,22 +1035,88 @@ expr ::= int_expr
 | Complex comprehensions | Expand to loops | Phase 2 |
 | Option types | Use sentinel values (-1, etc.) | Phase 3 |
 
-## Appendix C: FAQ
+## Appendix C: Real-World Testing Results
 
-**Q: Why not support full MiniZinc?**  
-A: Full MiniZinc is very complex. This subset covers most practical models while keeping implementation tractable.
+### Hakank Collection Analysis (1509 files)
 
-**Q: How do I use features not in the subset?**  
-A: Either wait for later phases, use FlatZinc fallback, or manually rewrite your model.
+When testing with Hakank MiniZinc examples, found these major blockers:
 
-**Q: Will my FlatZinc models still work?**  
-A: Yes! FlatZinc support remains as fallback for unsupported features.
+1. **Set Types in Data Files** (VERY COMMON)
+   ```minizinc
+   % In .dzn files
+   s = [{1,2,3}, {4,5,6}, {7,8,9}];  % Set literals used for constraints
+   ```
+   - **Blocker**: Set literal syntax `{...}` not implemented
+   - **Impact**: ~40% of Hakank files use set constraints
+   - **Solution**: Phase 5+ implementation of set types and operations
 
-**Q: What about MiniZinc library functions?**  
-A: Phase 1 includes only built-in operations. Phase 2 will add common library predicates.
+2. **Array Functions in Initializers** (COMPLETE! ✅)
+   ```minizinc
+   % In .dzn files (data files)
+   currencies = array2d(1..4, 1..4, [values...]);  % 2D array initialization
+   grid = array3d(1..2, 1..3, 1..4, [values...]);  % 3D array initialization
+   ```
+   - **Status**: ✅ IMPLEMENTED - Parser recognizes `array2d()` and `array3d()` calls
+   - **Infrastructure**: ✅ Translator validates dimensions and extracts values
+   - **Validation**: ✅ Proper enum-based error messages with size mismatch details
+   - **Testing**: ✅ Tested with parameter arrays and range expressions (1..n)
+   - **Impact**: Many structured data problems now supported
 
-**Q: How is performance compared to FlatZinc?**  
-A: Should be similar or better, as we avoid flattening overhead and preserve structure.
+3. **Include Directives** (COMMON)
+   ```minizinc
+   include "globals.mzn";  % Load standard library predicates
+   ```
+   - **Blocker**: No file I/O or library loading implemented
+   - **Impact**: Many models reference standard library constraints
+   - **Solution**: Phase 5+ file loading and namespace management
+
+4. **String Variables and Operations** (LESS COMMON)
+   ```minizinc
+   var string: choice;  % String variables (not just in output)
+   ```
+   - **Status**: ❌ Not implemented beyond output formatting
+   - **Solution**: Phase 5+ full string support
+
+### Easy Wins for Phase 5
+
+1. **array2d() / array3d()** - HIGHEST PRIORITY
+   - Parser change only (translator ready)
+   - Unlocks structured data file problems
+   - Expected to fix ~30% more examples
+
+2. **Include directives** - HIGH PRIORITY
+   - File I/O for library loading
+   - Many models depend on this
+   - Expected to fix ~20% more examples
+
+3. **Set types** - MEDIUM PRIORITY
+   - Complex implementation
+   - Many models use sets
+   - Expected to fix ~40% more examples
+
+### Example: Arbitrage Loops Problem
+
+This illustrates the pattern:
+```minizinc
+% arbitrage_loops.mzn (model)
+array[1..n, 1..n] of float: currencies;
+```
+
+```minizinc
+% arbitrage_loops1.dzn (data file)
+n = 4;
+currencies = array2d(1..n, 1..n, [
+  0,      0.7779,  102.4590,  0.0083,
+  1.2851, 0,       131.7110,  0.01125,
+  ...
+]);
+```
+
+**Issue**: `array2d()` call in data file not parsed
+**Fix**: Add function call support in array initializers
+**Expected result**: Model should parse and solve successfully
+
+
 
 ---
 

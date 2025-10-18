@@ -17,6 +17,7 @@ pub enum TokenKind {
     Array,
     Bool,
     Constraint,
+    Enum,
     Float,
     Int,
     Maximize,
@@ -64,6 +65,7 @@ pub enum TokenKind {
     
     Comma,        // ,
     Colon,        // :
+    ColonColon,   // ::
     Semicolon,    // ;
     Pipe,         // |
     
@@ -243,7 +245,12 @@ impl Lexer {
             }
             ':' => {
                 self.advance();
-                TokenKind::Colon
+                if self.current_char == Some(':') {
+                    self.advance();
+                    TokenKind::ColonColon
+                } else {
+                    TokenKind::Colon
+                }
             }
             ';' => {
                 self.advance();
@@ -355,6 +362,7 @@ impl Lexer {
             "bool" => TokenKind::Bool,
             "constraint" => TokenKind::Constraint,
             "div" => TokenKind::Div,
+            "enum" => TokenKind::Enum,
             "false" => TokenKind::BoolLit(false),
             "float" => TokenKind::Float,
             "in" => TokenKind::In,
