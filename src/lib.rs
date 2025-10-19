@@ -321,6 +321,146 @@ pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, 
     Ok(model.solve())
 }
 
+/// Load and parse a MiniZinc data file (.dzn format)
+///
+/// Parses a .dzn file and returns the raw source with parameter declarations added.
+/// This allows separate handling of model and data files while respecting MiniZinc semantics.
+///
+/// # Arguments
+///
+/// * `dzn_source` - Content of a .dzn data file
+/// * `mzn_source` - The model file source (to preserve its structure)
+///
+/// # Returns
+///
+/// Combined MiniZinc source suitable for parsing
+///
+/// # Example
+///
+/// ```
+/// let model = "int: n; array[1..n] of int: costs; var 1..n: x; solve satisfy;";
+/// let data = "n = 5; costs = [1,2,3,4,5];";
+/// let combined = zelen::load_dzn_data(data, model).unwrap();
+/// ```
+pub fn load_dzn_data(dzn_source: &str, mzn_source: &str) -> Result<String> {
+    // Parse .dzn assignments: "name = value;"
+    let mut data_params = String::new();
+    
+    for line in dzn_source.lines() {
+        let trimmed = line.trim();
+        
+        // Skip comments
+        if trimmed.starts_with('%') {
+            continue;
+        }
+        
+        // Remove inline comments
+        let code = if let Some(pos) = trimmed.find('%') {
+            trimmed[..pos].trim_end()
+        } else {
+            trimmed
+        };
+        
+        if code.is_empty() {
+            continue;
+        }
+        
+        // Extract "name = value;" statements
+        for stmt in code.split(';') {
+            let stmt = stmt.trim();
+            if stmt.is_empty() {
+                continue;
+            }
+            
+            if let Some(eq_pos) = stmt.find('=') {
+                let name = stmt[..eq_pos].trim();
+                let value = stmt[eq_pos + 1..].trim();
+                
+                // Convert to parameter declaration
+                // Infer type from value
+                let type_decl = if value.starts_with('[') && value.ends_with(']') {
+                    // Array - count elements to infer size
+                    let inner = &value[1..value.len()-1];
+                    if inner.is_empty() {
+                        "array[int] of int".to_string()
+                    } else {
+                        let elem_count = inner.split(',').count();
+                        let elem_type = if inner.contains('.') {
+                            "float"
+                        } else if inner.contains("true") || inner.contains("false") {
+                            "bool"
+                        } else {
+                            "int"
+                        };
+                        format!("array[1..{}] of {}", elem_count, elem_type)
+                    }
+                } else if value == "true" || value == "false" {
+                    "bool".to_string()
+                } else if value.parse::<f64>().is_ok() && value.contains('.') {
+                    "float".to_string()
+                } else {
+                    "int".to_string()
+                };
+                
+                data_params.push_str(&format!("{}: {} = {};\n", type_decl, name, value));
+            }
+        }
+    }
+    
+    // Merge: prepend data parameters, then add model
+    // But filter out duplicate declarations from model
+    let mut filtered_model = String::new();
+    let mut param_names = std::collections::HashSet::new();
+    
+    // Extract declared parameter names from data
+    for line in data_params.lines() {
+        if let Some(eq_pos) = line.find('=') {
+            let before_eq = &line[..eq_pos];
+            if let Some(last_colon) = before_eq.rfind(':') {
+                let name_part = &before_eq[last_colon+1..].trim();
+                if let Some(name) = name_part.split_whitespace().next() {
+                    param_names.insert(name.to_string());
+                }
+            }
+        }
+    }
+    
+    // Filter model - skip parameter declarations for names we have data for
+    for line in mzn_source.lines() {
+        let code_line = if let Some(pos) = line.find('%') {
+            &line[..pos]
+        } else {
+            line
+        };
+        
+        let trimmed = code_line.trim();
+        
+        // Skip lines that declare parameters we're providing data for
+        let mut skip = false;
+        if !trimmed.starts_with("var ") && !trimmed.starts_with("constraint ") 
+            && !trimmed.starts_with("solve ") && trimmed.contains(':') 
+            && !trimmed.contains('=') && trimmed.ends_with(';') {
+            // This looks like a parameter declaration without initializer
+            for param_name in &param_names {
+                if let Some(last_colon) = trimmed.rfind(':') {
+                    let after_colon = &trimmed[last_colon+1..].trim_end_matches(';');
+                    if after_colon.trim().ends_with(param_name) {
+                        skip = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if !skip {
+            filtered_model.push_str(line);
+            filtered_model.push('\n');
+        }
+    }
+    
+    Ok(format!("{}\n{}", data_params, filtered_model))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

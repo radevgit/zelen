@@ -123,7 +123,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if args.verbose {
             eprintln!("Merging model and data sources...");
         }
-        format!("{}\n{}", source, data)
+        zelen::load_dzn_data(&data, &source).map_err(|e| {
+            format!("Failed to merge data: {}", e)
+        })?
     } else {
         source
     };

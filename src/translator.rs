@@ -2268,6 +2268,19 @@ impl Translator {
                                 self.model.element(&arr, zero_based_index, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.int(v, v)
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_bool_var_array(array_name) {
                                 let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                                 let index_minus_one = self.model.sub(index_var, one);
@@ -2276,12 +2289,38 @@ impl Translator {
                                 self.model.element(&arr, zero_based_index, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.bool();
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                                    self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_float_var_array(array_name) {
                                 let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                                 let index_minus_one = self.model.sub(index_var, one);
                                 self.model.new(zero_based_index.eq(index_minus_one));
                                 let result = self.model.float(f64::MIN, f64::MAX);
                                 self.model.element(&arr, zero_based_index, result);
+                                return Ok(result);
+                            }
+                            if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.float(v, v)
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
                                 return Ok(result);
                             }
                             
@@ -2347,14 +2386,41 @@ impl Translator {
                                 self.model.element(&arr, flat_index_var, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.int(v, v)
+                                }).collect();
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element(&var_arr, flat_index_var, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_bool_var_array(array_name) {
                                 let result = self.model.bool();
                                 self.model.element(&arr, flat_index_var, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                                    self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                                }).collect();
+                                let result = self.model.bool();
+                                self.model.element(&var_arr, flat_index_var, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_float_var_array(array_name) {
                                 let result = self.model.float(f64::MIN, f64::MAX);
                                 self.model.element(&arr, flat_index_var, result);
+                                return Ok(result);
+                            }
+                            if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.float(v, v)
+                                }).collect();
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element(&var_arr, flat_index_var, result);
                                 return Ok(result);
                             }
                             
@@ -2431,6 +2497,18 @@ impl Translator {
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
                 }
+                if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.int(i32::MIN, i32::MAX);
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                        self.model.int(v, v)
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
+                    return Ok(result);
+                }
                 if let Some(arr) = self.context.get_bool_var_array(array_name) {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
@@ -2439,12 +2517,36 @@ impl Translator {
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
                 }
+                if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.bool();
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                        self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
+                    return Ok(result);
+                }
                 if let Some(arr) = self.context.get_float_var_array(array_name) {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
                     self.model.new(zero_based_index.eq(index_minus_one));
                     let result = self.model.float(f64::MIN, f64::MAX);
                     self.model.element(&arr, zero_based_index, result);
+                    return Ok(result);
+                }
+                if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.float(f64::MIN, f64::MAX);
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                        self.model.float(v, v)
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
                     return Ok(result);
                 }
                 
