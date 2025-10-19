@@ -3,7 +3,7 @@
 //! Translates a parsed MiniZinc AST into Selen Model objects for execution.
 
 use crate::ast::{self, Span};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use selen::prelude::*;
 use std::collections::HashMap;
 
@@ -132,24 +132,55 @@ impl TranslatorContext {
         }
     }
 
-    fn add_int_var(&mut self, name: String, var: VarId) {
+    /// Check if a variable name is already declared (across all types)
+    fn is_var_declared(&self, name: &str) -> bool {
+        self.int_vars.contains_key(name)
+            || self.bool_vars.contains_key(name)
+            || self.float_vars.contains_key(name)
+            || self.int_var_arrays.contains_key(name)
+            || self.bool_var_arrays.contains_key(name)
+            || self.float_var_arrays.contains_key(name)
+    }
+
+    fn add_int_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.int_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_int_var(&self, name: &str) -> Option<VarId> {
         self.int_vars.get(name).copied()
     }
 
-    fn add_bool_var(&mut self, name: String, var: VarId) {
+    fn add_bool_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.bool_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_bool_var(&self, name: &str) -> Option<VarId> {
         self.bool_vars.get(name).copied()
     }
 
-    fn add_float_var(&mut self, name: String, var: VarId) {
+    fn add_float_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.float_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_float_var(&self, name: &str) -> Option<VarId> {
@@ -322,6 +353,7 @@ pub enum ObjectiveType {
 ///     let _ = (name, var_id);  // Variable available here
 /// }
 /// ```
+#[non_exhaustive]
 pub struct TranslatedModel {
     /// The Selen constraint model ready to solve
     pub model: selen::model::Model,
@@ -758,17 +790,17 @@ impl Translator {
                         ast::BaseType::Bool => {
                             // var bool: x
                             let var = self.model.bool();
-                            self.context.add_bool_var(var_decl.name.clone(), var);
+                            self.context.add_bool_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Int => {
                             // var int: x (unbounded)
                             let var = self.model.int(i32::MIN, i32::MAX);
-                            self.context.add_int_var(var_decl.name.clone(), var);
+                            self.context.add_int_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Float => {
                             // var float: x (unbounded)
                             let var = self.model.float(f64::MIN, f64::MAX);
-                            self.context.add_float_var(var_decl.name.clone(), var);
+                            self.context.add_float_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Enum(enum_name) => {
                             // var EnumType: x
@@ -781,7 +813,7 @@ impl Translator {
                                 .clone();
                             let cardinality = enum_values.len() as i32;
                             let var = self.model.int(1, cardinality);
-                            self.context.add_int_var(var_decl.name.clone(), var);
+                            self.context.add_int_var(var_decl.name.clone(), var)?;
                             // Track this variable as an enum for output formatting
                             self.enum_var_mapping.insert(
                                 var_decl.name.clone(),
@@ -858,17 +890,17 @@ impl Translator {
                         if std::env::var("ZELEN_DEBUG").is_ok() {
                             eprintln!("DEBUG: Created int var '{}': {:?} with range [{}, {}]", var_decl.name, var, min, max);
                         }
-                        self.context.add_int_var(var_decl.name.clone(), var);
+                        self.context.add_int_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Float => {
                         let (min, max) = self.eval_float_domain(domain)?;
                         let var = self.model.float(min, max);
-                        self.context.add_float_var(var_decl.name.clone(), var);
+                        self.context.add_float_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Bool => {
                         // var 0..1: x or similar - treat as bool
                         let var = self.model.bool();
-                        self.context.add_bool_var(var_decl.name.clone(), var);
+                        self.context.add_bool_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Enum(_) => {
                         // Constrained enum is not typical, but treat as error

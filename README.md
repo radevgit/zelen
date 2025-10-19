@@ -242,7 +242,7 @@ See `examples/` directory for source code and `examples/models/` for test MiniZi
 - ❌ Search annotations
 - ❌ Some output predicates
 - ❌ Include directives (globals.mzn not needed for current model set)
-```
+
 
 ## Architecture
 
