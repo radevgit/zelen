@@ -23,6 +23,8 @@ pub enum Item {
     Solve(Solve),
     /// Output item: `output ["x = ", show(x)];`
     Output(Output),
+    /// Include statement (parsed but ignored): `include "globals.mzn";`
+    Include { filename: String, span: Span },
 }
 
 /// Enumerated type definition
@@ -234,6 +236,9 @@ pub enum BinOp {
     // Set
     In,       // in
     Range,    // ..
+    
+    // String
+    Concat,   // ++
 }
 
 /// Unary operators
@@ -292,6 +297,7 @@ impl fmt::Display for BinOp {
             BinOp::Xor => "xor",
             BinOp::In => "in",
             BinOp::Range => "..",
+            BinOp::Concat => "++",
         };
         write!(f, "{}", s)
     }

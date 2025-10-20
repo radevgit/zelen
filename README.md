@@ -19,7 +19,8 @@ Zelen is a MiniZinc parser and solver that directly translates MiniZinc models t
 - Arithmetic: `+`, `-`, `*`, `/`, `%` (modulo)
 - Comparison: `=`, `!=`, `<`, `<=`, `>`, `>=`
 - Boolean logic: `not`, `/\` (and), `\/` (or), `->` (implication), `<->`
-- Global: `all_different`, `element`, `min`, `max`, `sum`
+- Global: `all_different`, `element`, `cumulative`
+- Aggregation: `min`, `max`, `sum`
 - Aggregation: `forall`, `exists`
 - **Nested forall loops**: `forall(i, j in 1..n)(constraint)`
 
@@ -225,7 +226,7 @@ See `examples/` directory for source code and `examples/models/` for test MiniZi
 - ✅ Integer, boolean, and float types
 - ✅ Arithmetic and comparison operators
 - ✅ Boolean logic operators
-- ✅ Global constraints: `all_different`, `element`
+- ✅ Global constraints: `all_different`, `element`, `cumulative`
 - ✅ Aggregates: `min`, `max`, `sum`
 - ✅ Forall loops (single and nested generators)
 - ✅ Array initialization with literals
@@ -234,14 +235,21 @@ See `examples/` directory for source code and `examples/models/` for test MiniZi
 - ✅ Multiple input formats (.mzn and .dzn files)
 - ✅ **Enumerated types**: `enum Color = {Red, Green, Blue};` and `var Color: x;`
 - ✅ **Array2D and Array3D** types with proper flattening
+- ✅ **If-then-else expressions**: `if cond then expr1 else expr2 endif`
+- ✅ **String concatenation**: `++` operator
+- ✅ **Include directives**: `include "filename.mzn";` (parsed but ignored)
+- ✅ **Cumulative constraint**: `cumulative(start, duration, height, capacity)` for scheduling
+- ✅ **Table constraint**: `table(variables, allowed_tuples)` for tuple-based constraints
 
-### Not Supported
+### Not Supported / Limitations
+- ❌ Predicate definitions (`predicate name(...) = ...`)
 - ❌ Set operations
 - ❌ Complex comprehensions beyond forall
-- ❌ Advanced global constraints (cumulative, circuit, etc.)
+- ❌ Advanced global constraints (circuit, etc.)
 - ❌ Search annotations
 - ❌ Some output predicates
-- ❌ Include directives (globals.mzn not needed for current model set)
+- ⚠️ **Cumulative**: Capacity must be constant (not variable)
+- ⚠️ **Table**: Second argument must be a named parameter array (not inline expressions); 2D parameter arrays limited to array2d() declarations
 
 
 ## Architecture

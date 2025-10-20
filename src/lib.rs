@@ -343,67 +343,44 @@ pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, 
 /// let combined = zelen::load_dzn_data(data, model).unwrap();
 /// ```
 pub fn load_dzn_data(dzn_source: &str, mzn_source: &str) -> Result<String> {
-    // Parse .dzn assignments: "name = value;"
+    // Parse .dzn assignments with proper handling of complex syntax
+    // (.dzn files can have sets like {1,2,3} and nested structures)
     let mut data_params = String::new();
+    let mut current_stmt = String::new();
     
-    for line in dzn_source.lines() {
-        let trimmed = line.trim();
+    for ch in dzn_source.chars() {
+        current_stmt.push(ch);
         
-        // Skip comments
-        if trimmed.starts_with('%') {
-            continue;
-        }
-        
-        // Remove inline comments
-        let code = if let Some(pos) = trimmed.find('%') {
-            trimmed[..pos].trim_end()
-        } else {
-            trimmed
-        };
-        
-        if code.is_empty() {
-            continue;
-        }
-        
-        // Extract "name = value;" statements
-        for stmt in code.split(';') {
-            let stmt = stmt.trim();
-            if stmt.is_empty() {
-                continue;
-            }
+        // Only process complete statements (ending with ';')
+        if ch == ';' {
+            let trimmed = current_stmt.trim();
             
-            if let Some(eq_pos) = stmt.find('=') {
-                let name = stmt[..eq_pos].trim();
-                let value = stmt[eq_pos + 1..].trim();
-                
-                // Convert to parameter declaration
-                // Infer type from value
-                let type_decl = if value.starts_with('[') && value.ends_with(']') {
-                    // Array - count elements to infer size
-                    let inner = &value[1..value.len()-1];
-                    if inner.is_empty() {
-                        "array[int] of int".to_string()
-                    } else {
-                        let elem_count = inner.split(',').count();
-                        let elem_type = if inner.contains('.') {
-                            "float"
-                        } else if inner.contains("true") || inner.contains("false") {
-                            "bool"
-                        } else {
-                            "int"
-                        };
-                        format!("array[1..{}] of {}", elem_count, elem_type)
-                    }
-                } else if value == "true" || value == "false" {
-                    "bool".to_string()
-                } else if value.parse::<f64>().is_ok() && value.contains('.') {
-                    "float".to_string()
+            // Skip if just a semicolon or empty
+            if trimmed.len() > 1 {
+                // Remove inline comments first
+                let code = if let Some(pos) = trimmed.find('%') {
+                    &trimmed[..pos]
                 } else {
-                    "int".to_string()
+                    trimmed
                 };
                 
-                data_params.push_str(&format!("{}: {} = {};\n", type_decl, name, value));
+                let code = code.trim_end_matches(';').trim();
+                
+                if !code.is_empty() && !code.starts_with('%') {
+                    // Now extract "name = value" (value can have {}, [], nested structures)
+                    if let Some(eq_pos) = code.find('=') {
+                        let name = code[..eq_pos].trim();
+                        let value = code[eq_pos + 1..].trim();
+                        
+                        // Infer type from value
+                        let type_decl = infer_dzn_type(value);
+                        
+                        data_params.push_str(&format!("{}: {} = {};\n", type_decl, name, value));
+                    }
+                }
             }
+            
+            current_stmt.clear();
         }
     }
     
@@ -459,6 +436,75 @@ pub fn load_dzn_data(dzn_source: &str, mzn_source: &str) -> Result<String> {
     }
     
     Ok(format!("{}\n{}", data_params, filtered_model))
+}
+
+/// Infer MiniZinc type from a .dzn value string
+/// Handles simple scalars and complex array/set syntax
+fn infer_dzn_type(value: &str) -> String {
+    let trimmed = value.trim();
+    
+    if trimmed.starts_with('[') {
+        // Array: could be simple [1,2,3] or complex [{...}, {...}]
+        // For complex arrays with sets, default to "array[int] of int"
+        // The type will be overridden or fixed by the MiniZinc semantics anyway
+        
+        if trimmed.contains('{') {
+            // Likely an array of sets - use generic array type
+            // MiniZinc will infer the proper type during parsing
+            "array[int] of int".to_string()
+        } else {
+            // Simple array - count elements
+            let inner = &trimmed[1..trimmed.len().saturating_sub(1)];
+            if inner.is_empty() {
+                "array[int] of int".to_string()
+            } else {
+                let elem_count = count_array_elements(inner);
+                let elem_type = determine_element_type(inner);
+                format!("array[1..{}] of {}", elem_count, elem_type)
+            }
+        }
+    } else if trimmed == "true" || trimmed == "false" {
+        "bool".to_string()
+    } else if trimmed.parse::<f64>().is_ok() && trimmed.contains('.') {
+        "float".to_string()
+    } else if trimmed.parse::<i64>().is_ok() {
+        "int".to_string()
+    } else {
+        // Unknown type - default to int
+        "int".to_string()
+    }
+}
+
+/// Count comma-separated elements in an array value string
+fn count_array_elements(inner: &str) -> usize {
+    if inner.trim().is_empty() {
+        return 0;
+    }
+    
+    let mut depth: i32 = 0;
+    let mut count = 1;
+    
+    for ch in inner.chars() {
+        match ch {
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => count += 1,
+            _ => {}
+        }
+    }
+    
+    count
+}
+
+/// Determine the element type of array elements
+fn determine_element_type(inner: &str) -> &'static str {
+    if inner.contains('.') {
+        "float"
+    } else if inner.contains("true") || inner.contains("false") {
+        "bool"
+    } else {
+        "int"
+    }
 }
 
 #[cfg(test)]
