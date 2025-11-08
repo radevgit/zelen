@@ -273,3 +273,6 @@ Zelen uses [Selen](https://github.com/radevgit/selen) v0.14+ as its constraint s
 - [Selen](https://github.com/radevgit/selen) - The underlying CSP solver
 - [MiniZinc](https://www.minizinc.org/) - Constraint modeling language
 
+## Related Projects
+
+Zelen is part of the open-sourced [Nest2D](https://nest2d.com) projects collection.
