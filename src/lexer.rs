@@ -17,8 +17,12 @@ pub enum TokenKind {
     Array,
     Bool,
     Constraint,
+    Else,
+    Endif,
     Enum,
     Float,
+    If,
+    Include,
     Int,
     Maximize,
     Minimize,
@@ -27,6 +31,7 @@ pub enum TokenKind {
     Par,
     Satisfy,
     Solve,
+    Then,
     Var,
     Where,
     In,
@@ -38,6 +43,7 @@ pub enum TokenKind {
     Slash,        // /
     Div,          // div
     Mod,          // mod
+    Concat,       // ++
     
     Lt,           // <
     Le,           // <=
@@ -131,7 +137,12 @@ impl Lexer {
         let kind = match ch {
             '+' => {
                 self.advance();
-                TokenKind::Plus
+                if self.current_char == Some('+') {
+                    self.advance();
+                    TokenKind::Concat
+                } else {
+                    TokenKind::Plus
+                }
             }
             '-' => {
                 self.advance();
@@ -362,9 +373,13 @@ impl Lexer {
             "bool" => TokenKind::Bool,
             "constraint" => TokenKind::Constraint,
             "div" => TokenKind::Div,
+            "else" => TokenKind::Else,
+            "endif" => TokenKind::Endif,
             "enum" => TokenKind::Enum,
             "false" => TokenKind::BoolLit(false),
             "float" => TokenKind::Float,
+            "if" => TokenKind::If,
+            "include" => TokenKind::Include,
             "in" => TokenKind::In,
             "int" => TokenKind::Int,
             "maximize" => TokenKind::Maximize,
@@ -376,6 +391,7 @@ impl Lexer {
             "par" => TokenKind::Par,
             "satisfy" => TokenKind::Satisfy,
             "solve" => TokenKind::Solve,
+            "then" => TokenKind::Then,
             "true" => TokenKind::BoolLit(true),
             "var" => TokenKind::Var,
             "where" => TokenKind::Where,

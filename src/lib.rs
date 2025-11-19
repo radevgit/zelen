@@ -321,6 +321,192 @@ pub fn solve(source: &str) -> Result<std::result::Result<selen::core::Solution, 
     Ok(model.solve())
 }
 
+/// Load and parse a MiniZinc data file (.dzn format)
+///
+/// Parses a .dzn file and returns the raw source with parameter declarations added.
+/// This allows separate handling of model and data files while respecting MiniZinc semantics.
+///
+/// # Arguments
+///
+/// * `dzn_source` - Content of a .dzn data file
+/// * `mzn_source` - The model file source (to preserve its structure)
+///
+/// # Returns
+///
+/// Combined MiniZinc source suitable for parsing
+///
+/// # Example
+///
+/// ```
+/// let model = "int: n; array[1..n] of int: costs; var 1..n: x; solve satisfy;";
+/// let data = "n = 5; costs = [1,2,3,4,5];";
+/// let combined = zelen::load_dzn_data(data, model).unwrap();
+/// ```
+pub fn load_dzn_data(dzn_source: &str, mzn_source: &str) -> Result<String> {
+    // Parse .dzn assignments with proper handling of complex syntax
+    // (.dzn files can have sets like {1,2,3} and nested structures)
+    let mut data_params = String::new();
+    let mut current_stmt = String::new();
+    
+    for ch in dzn_source.chars() {
+        current_stmt.push(ch);
+        
+        // Only process complete statements (ending with ';')
+        if ch == ';' {
+            let trimmed = current_stmt.trim();
+            
+            // Skip if just a semicolon or empty
+            if trimmed.len() > 1 {
+                // Remove inline comments first
+                let code = if let Some(pos) = trimmed.find('%') {
+                    &trimmed[..pos]
+                } else {
+                    trimmed
+                };
+                
+                let code = code.trim_end_matches(';').trim();
+                
+                if !code.is_empty() && !code.starts_with('%') {
+                    // Now extract "name = value" (value can have {}, [], nested structures)
+                    if let Some(eq_pos) = code.find('=') {
+                        let name = code[..eq_pos].trim();
+                        let value = code[eq_pos + 1..].trim();
+                        
+                        // Infer type from value
+                        let type_decl = infer_dzn_type(value);
+                        
+                        data_params.push_str(&format!("{}: {} = {};\n", type_decl, name, value));
+                    }
+                }
+            }
+            
+            current_stmt.clear();
+        }
+    }
+    
+    // Merge: prepend data parameters, then add model
+    // But filter out duplicate declarations from model
+    let mut filtered_model = String::new();
+    let mut param_names = std::collections::HashSet::new();
+    
+    // Extract declared parameter names from data
+    for line in data_params.lines() {
+        if let Some(eq_pos) = line.find('=') {
+            let before_eq = &line[..eq_pos];
+            if let Some(last_colon) = before_eq.rfind(':') {
+                let name_part = &before_eq[last_colon+1..].trim();
+                if let Some(name) = name_part.split_whitespace().next() {
+                    param_names.insert(name.to_string());
+                }
+            }
+        }
+    }
+    
+    // Filter model - skip parameter declarations for names we have data for
+    for line in mzn_source.lines() {
+        let code_line = if let Some(pos) = line.find('%') {
+            &line[..pos]
+        } else {
+            line
+        };
+        
+        let trimmed = code_line.trim();
+        
+        // Skip lines that declare parameters we're providing data for
+        let mut skip = false;
+        if !trimmed.starts_with("var ") && !trimmed.starts_with("constraint ") 
+            && !trimmed.starts_with("solve ") && trimmed.contains(':') 
+            && !trimmed.contains('=') && trimmed.ends_with(';') {
+            // This looks like a parameter declaration without initializer
+            for param_name in &param_names {
+                if let Some(last_colon) = trimmed.rfind(':') {
+                    let after_colon = &trimmed[last_colon+1..].trim_end_matches(';');
+                    if after_colon.trim().ends_with(param_name) {
+                        skip = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if !skip {
+            filtered_model.push_str(line);
+            filtered_model.push('\n');
+        }
+    }
+    
+    Ok(format!("{}\n{}", data_params, filtered_model))
+}
+
+/// Infer MiniZinc type from a .dzn value string
+/// Handles simple scalars and complex array/set syntax
+fn infer_dzn_type(value: &str) -> String {
+    let trimmed = value.trim();
+    
+    if trimmed.starts_with('[') {
+        // Array: could be simple [1,2,3] or complex [{...}, {...}]
+        // For complex arrays with sets, default to "array[int] of int"
+        // The type will be overridden or fixed by the MiniZinc semantics anyway
+        
+        if trimmed.contains('{') {
+            // Likely an array of sets - use generic array type
+            // MiniZinc will infer the proper type during parsing
+            "array[int] of int".to_string()
+        } else {
+            // Simple array - count elements
+            let inner = &trimmed[1..trimmed.len().saturating_sub(1)];
+            if inner.is_empty() {
+                "array[int] of int".to_string()
+            } else {
+                let elem_count = count_array_elements(inner);
+                let elem_type = determine_element_type(inner);
+                format!("array[1..{}] of {}", elem_count, elem_type)
+            }
+        }
+    } else if trimmed == "true" || trimmed == "false" {
+        "bool".to_string()
+    } else if trimmed.parse::<f64>().is_ok() && trimmed.contains('.') {
+        "float".to_string()
+    } else if trimmed.parse::<i64>().is_ok() {
+        "int".to_string()
+    } else {
+        // Unknown type - default to int
+        "int".to_string()
+    }
+}
+
+/// Count comma-separated elements in an array value string
+fn count_array_elements(inner: &str) -> usize {
+    if inner.trim().is_empty() {
+        return 0;
+    }
+    
+    let mut depth: i32 = 0;
+    let mut count = 1;
+    
+    for ch in inner.chars() {
+        match ch {
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => count += 1,
+            _ => {}
+        }
+    }
+    
+    count
+}
+
+/// Determine the element type of array elements
+fn determine_element_type(inner: &str) -> &'static str {
+    if inner.contains('.') {
+        "float"
+    } else if inner.contains("true") || inner.contains("false") {
+        "bool"
+    } else {
+        "int"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

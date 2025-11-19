@@ -54,12 +54,41 @@ impl Parser {
     /// Parse a single item
     fn parse_item(&mut self) -> Result<Item> {
         match &self.current_token.kind {
+            TokenKind::Include => self.parse_include(),
             TokenKind::Constraint => self.parse_constraint(),
             TokenKind::Enum => self.parse_enum_def(),
             TokenKind::Solve => self.parse_solve(),
             TokenKind::Output => self.parse_output(),
             _ => self.parse_var_decl(),
         }
+    }
+
+    /// Parse include statement: `include "filename.mzn";`
+    /// Include statements are parsed but ignored (not processed further)
+    fn parse_include(&mut self) -> Result<Item> {
+        let start = self.current_token.span.start;
+        
+        self.expect(TokenKind::Include)?;
+        let filename = match &self.current_token.kind {
+            TokenKind::StringLit(s) => {
+                let filename = s.clone();
+                self.advance()?;
+                filename
+            }
+            _ => {
+                return Err(self.add_source_to_error(Error::message(
+                    "Expected string literal after 'include'",
+                    self.current_token.span,
+                )));
+            }
+        };
+        
+        self.expect(TokenKind::Semicolon)?;
+        
+        let end = self.current_token.span.end;
+        
+        // Return an Include item (ignored during translation)
+        Ok(Item::Include { filename, span: Span::new(start, end) })
     }
 
     /// Parse enum definition: `enum Color = {Red, Green, Blue};`
@@ -476,6 +505,7 @@ impl Parser {
                 TokenKind::Slash => BinOp::FDiv,
                 TokenKind::Div => BinOp::Div,
                 TokenKind::Mod => BinOp::Mod,
+                TokenKind::Concat => BinOp::Concat,
                 TokenKind::Lt => BinOp::Lt,
                 TokenKind::Le => BinOp::Le,
                 TokenKind::Gt => BinOp::Gt,
@@ -526,7 +556,7 @@ impl Parser {
             BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne => (10, 9),
             BinOp::In => (10, 9),
             BinOp::Range => (12, 11),
-            BinOp::Add | BinOp::Sub => (14, 13),
+            BinOp::Add | BinOp::Sub | BinOp::Concat => (14, 13),
             BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::FDiv => (16, 15),
         }
     }
@@ -728,6 +758,9 @@ impl Parser {
             TokenKind::LBrace => {
                 return self.parse_set_literal();
             }
+            TokenKind::If => {
+                return self.parse_if_then_else();
+            }
             _ => {
                 return Err(self.add_source_to_error(Error::unexpected_token(
                     "expression",
@@ -845,6 +878,35 @@ impl Parser {
                 Err(_) => return false,
             }
         }
+    }
+    
+    /// Parse if-then-else: `if cond then expr1 else expr2 endif`
+    fn parse_if_then_else(&mut self) -> Result<Expr> {
+        let start = self.current_token.span.start;
+        self.expect(TokenKind::If)?;
+        
+        let cond = self.parse_expr()?;
+        self.expect(TokenKind::Then)?;
+        let then_expr = self.parse_expr()?;
+        
+        let else_expr = if self.current_token.kind == TokenKind::Else {
+            self.advance()?;
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+        
+        self.expect(TokenKind::Endif)?;
+        let end = self.current_token.span.end;
+        
+        Ok(Expr {
+            kind: ExprKind::IfThenElse {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr,
+            },
+            span: Span::new(start, end),
+        })
     }
     
     /// Parse generators: `i in 1..n where i > 0, j in 1..m`

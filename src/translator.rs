@@ -3,8 +3,9 @@
 //! Translates a parsed MiniZinc AST into Selen Model objects for execution.
 
 use crate::ast::{self, Span};
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use selen::prelude::*;
+use selen::constraints::functions;
 use std::collections::HashMap;
 
 /// Metadata for multi-dimensional arrays to support flattening
@@ -132,24 +133,55 @@ impl TranslatorContext {
         }
     }
 
-    fn add_int_var(&mut self, name: String, var: VarId) {
+    /// Check if a variable name is already declared (across all types)
+    fn is_var_declared(&self, name: &str) -> bool {
+        self.int_vars.contains_key(name)
+            || self.bool_vars.contains_key(name)
+            || self.float_vars.contains_key(name)
+            || self.int_var_arrays.contains_key(name)
+            || self.bool_var_arrays.contains_key(name)
+            || self.float_var_arrays.contains_key(name)
+    }
+
+    fn add_int_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.int_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_int_var(&self, name: &str) -> Option<VarId> {
         self.int_vars.get(name).copied()
     }
 
-    fn add_bool_var(&mut self, name: String, var: VarId) {
+    fn add_bool_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.bool_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_bool_var(&self, name: &str) -> Option<VarId> {
         self.bool_vars.get(name).copied()
     }
 
-    fn add_float_var(&mut self, name: String, var: VarId) {
+    fn add_float_var(&mut self, name: String, var: VarId) -> Result<()> {
+        if self.is_var_declared(&name) {
+            return Err(Error::new(
+                ErrorKind::DuplicateDeclaration(name),
+                Span { start: 0, end: 0 },
+            ));
+        }
         self.float_vars.insert(name, var);
+        Ok(())
     }
 
     fn get_float_var(&self, name: &str) -> Option<VarId> {
@@ -322,6 +354,7 @@ pub enum ObjectiveType {
 ///     let _ = (name, var_id);  // Variable available here
 /// }
 /// ```
+#[non_exhaustive]
 pub struct TranslatedModel {
     /// The Selen constraint model ready to solve
     pub model: selen::model::Model,
@@ -746,6 +779,10 @@ impl Translator {
                 self.output_items.push(output.expr.clone());
                 Ok(())
             }
+            ast::Item::Include { .. } => {
+                // Include statements are parsed but ignored during translation
+                Ok(())
+            }
         }
     }
 
@@ -758,17 +795,17 @@ impl Translator {
                         ast::BaseType::Bool => {
                             // var bool: x
                             let var = self.model.bool();
-                            self.context.add_bool_var(var_decl.name.clone(), var);
+                            self.context.add_bool_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Int => {
                             // var int: x (unbounded)
                             let var = self.model.int(i32::MIN, i32::MAX);
-                            self.context.add_int_var(var_decl.name.clone(), var);
+                            self.context.add_int_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Float => {
                             // var float: x (unbounded)
                             let var = self.model.float(f64::MIN, f64::MAX);
-                            self.context.add_float_var(var_decl.name.clone(), var);
+                            self.context.add_float_var(var_decl.name.clone(), var)?;
                         }
                         ast::BaseType::Enum(enum_name) => {
                             // var EnumType: x
@@ -781,7 +818,7 @@ impl Translator {
                                 .clone();
                             let cardinality = enum_values.len() as i32;
                             let var = self.model.int(1, cardinality);
-                            self.context.add_int_var(var_decl.name.clone(), var);
+                            self.context.add_int_var(var_decl.name.clone(), var)?;
                             // Track this variable as an enum for output formatting
                             self.enum_var_mapping.insert(
                                 var_decl.name.clone(),
@@ -858,17 +895,17 @@ impl Translator {
                         if std::env::var("ZELEN_DEBUG").is_ok() {
                             eprintln!("DEBUG: Created int var '{}': {:?} with range [{}, {}]", var_decl.name, var, min, max);
                         }
-                        self.context.add_int_var(var_decl.name.clone(), var);
+                        self.context.add_int_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Float => {
                         let (min, max) = self.eval_float_domain(domain)?;
                         let var = self.model.float(min, max);
-                        self.context.add_float_var(var_decl.name.clone(), var);
+                        self.context.add_float_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Bool => {
                         // var 0..1: x or similar - treat as bool
                         let var = self.model.bool();
-                        self.context.add_bool_var(var_decl.name.clone(), var);
+                        self.context.add_bool_var(var_decl.name.clone(), var)?;
                     }
                     ast::BaseType::Enum(_) => {
                         // Constrained enum is not typical, but treat as error
@@ -1451,6 +1488,108 @@ impl Translator {
                     ));
                 }
             }
+            "cumulative" => {
+                // cumulative(start_times, durations, heights, capacity)
+                if args.len() != 4 {
+                    return Err(Error::type_error(
+                        "4 arguments",
+                        &format!("{} arguments", args.len()),
+                        ast::Span::dummy(),
+                    ));
+                }
+
+                // Get start times (array of VarIds)
+                let start_vars = self.get_array_vars(&args[0])?;
+                
+                // Get durations (array of constants)
+                let durations = self.extract_int_array(&args[1])?;
+                
+                // Get heights (array of constants or variables - convert to constants for now)
+                let demands = self.extract_int_array(&args[2])?;
+                
+                // Get capacity (single constant or variable)
+                let capacity_value = if let ast::ExprKind::Ident(name) = &args[3].kind {
+                    // Try to get as a variable first
+                    if self.context.get_int_var(name).is_some() {
+                        // For now, we need to get the upper bound of the variable
+                        // This is a limitation - Selen's cumulative expects a constant capacity
+                        // We'll use get_var_or_value to handle this
+                        return Err(Error::message(
+                            "cumulative capacity must be a constant value or parameter (variable capacities not yet supported)",
+                            args[3].span,
+                        ));
+                    } else if let Some(value) = self.context.get_int_param(name) {
+                        value
+                    } else {
+                        return Err(Error::message(
+                            &format!("Undefined variable or parameter: {}", name),
+                            args[3].span,
+                        ));
+                    }
+                } else {
+                    self.eval_int_expr(&args[3])?
+                };
+                
+                // Validate that all arrays have the same length
+                if start_vars.len() != durations.len() || start_vars.len() != demands.len() {
+                    return Err(Error::message(
+                        "All arrays in cumulative must have the same length",
+                        ast::Span::dummy(),
+                    ));
+                }
+                
+                // Call Selen's cumulative function
+                functions::cumulative(
+                    &mut self.model,
+                    &start_vars,
+                    &durations,
+                    &demands,
+                    capacity_value,
+                );
+            }
+            "table" => {
+                // table(variables, allowed_tuples)
+                if args.len() != 2 {
+                    return Err(Error::type_error(
+                        "2 arguments",
+                        &format!("{} arguments", args.len()),
+                        ast::Span::dummy(),
+                    ));
+                }
+
+                // Get the variables (array)
+                let vars = self.get_array_vars(&args[0])?;
+                
+                // Get the allowed tuples (2D array)
+                let tuples_2d = self.extract_int_array_2d(&args[1])?;
+                
+                // Convert 2D Vec<Vec<i32>> to Vec<Vec<Val>>
+                let tuples: Vec<Vec<selen::prelude::Val>> = tuples_2d
+                    .iter()
+                    .map(|row| {
+                        row.iter()
+                            .map(|&val| selen::prelude::Val::ValI(val))
+                            .collect()
+                    })
+                    .collect();
+                
+                // Validate tuple width matches number of variables
+                if let Some(first_row) = tuples.first() {
+                    if first_row.len() != vars.len() {
+                        return Err(Error::message(
+                            &format!(
+                                "Table: {} variables but tuples have {} columns",
+                                vars.len(),
+                                first_row.len()
+                            ),
+                            ast::Span::dummy(),
+                        ));
+                    }
+                }
+                
+                // Call Selen's table function
+                functions::table(&mut self.model, &vars, &tuples);
+            }
             _ => {
                 return Err(Error::unsupported_feature(
                     &format!("Constraint '{}'", name),
@@ -1690,16 +1829,64 @@ impl Translator {
             // Boolean logical operators
             ast::BinOp::And => {
                 // Translate as conjunction: both must be true
-                // Recursively translate each side as a constraint
-                let one = self.model.int(1, 1);
-                let left_constraint = self.expr_to_bool_var(left)?;
-                self.model.new(left_constraint.eq(one));
-                let one = self.model.int(1, 1);
-                let right_constraint = self.expr_to_bool_var(right)?;
-                self.model.new(right_constraint.eq(one));
+                // Check if either side is a GenCall (forall/exists), Call (global constraint), or nested And - these need special handling
+                match &left.kind {
+                    ast::ExprKind::GenCall { name, generators, body } => {
+                        // Translate the forall/exists as a constraint
+                        self.translate_constraint_gencall(name, generators, body)?;
+                    }
+                    ast::ExprKind::Call { name, args } => {
+                        // Translate global constraint (e.g., cumulative, alldifferent)
+                        self.translate_constraint_call(name, args)?;
+                    }
+                    ast::ExprKind::BinOp { op: left_op, left: ll, right: lr } => {
+                        // Nested BinOp - recursively translate
+                        self.translate_constraint_binop(*left_op, ll, lr)?;
+                    }
+                    _ => {
+                        // Regular expression - convert to boolean
+                        let one = self.model.int(1, 1);
+                        let left_constraint = self.expr_to_bool_var(left)?;
+                        self.model.new(left_constraint.eq(one));
+                    }
+                }
+                
+                match &right.kind {
+                    ast::ExprKind::GenCall { name, generators, body } => {
+                        // Translate the forall/exists as a constraint
+                        self.translate_constraint_gencall(name, generators, body)?;
+                    }
+                    ast::ExprKind::Call { name, args } => {
+                        // Translate global constraint (e.g., cumulative, alldifferent)
+                        self.translate_constraint_call(name, args)?;
+                    }
+                    ast::ExprKind::BinOp { op: right_op, left: rl, right: rr } => {
+                        // Nested BinOp - recursively translate
+                        self.translate_constraint_binop(*right_op, rl, rr)?;
+                    }
+                    _ => {
+                        // Regular expression - convert to boolean
+                        let one = self.model.int(1, 1);
+                        let right_constraint = self.expr_to_bool_var(right)?;
+                        self.model.new(right_constraint.eq(one));
+                    }
+                }
             }
             ast::BinOp::Or => {
                 // Translate as disjunction: at least one must be true
+                // Check if either side is a GenCall - can't have forall in OR
+                if matches!(&left.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in disjunction (OR)",
+                        left.span,
+                    ));
+                }
+                if matches!(&right.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in disjunction (OR)",
+                        right.span,
+                    ));
+                }
                 let left_constraint = self.expr_to_bool_var(left)?;
                 let right_constraint = self.expr_to_bool_var(right)?;
                 // At least one must be 1: left + right >= 1
@@ -1708,15 +1895,39 @@ impl Translator {
                 self.model.new(sum.ge(one));
             }
             ast::BinOp::Impl => {
-                // Translate as implication: left => right
+                // Implication: left => right
+                // Check if either side is a GenCall
+                if matches!(&left.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in implication",
+                        left.span,
+                    ));
+                }
+                if matches!(&right.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in implication",
+                        right.span,
+                    ));
+                }
                 let left_constraint = self.expr_to_bool_var(left)?;
                 let right_constraint = self.expr_to_bool_var(right)?;
                 self.model.implies(left_constraint, right_constraint);
             }
             ast::BinOp::Iff => {
-                // Translate as bi-directional implication: left <-> right
-                // This means left and right must have the same value
-                // Equivalent to: (left -> right) /\ (right -> left)
+                // Bi-directional implication: left <-> right
+                // Check if either side is a GenCall
+                if matches!(&left.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in equivalence",
+                        left.span,
+                    ));
+                }
+                if matches!(&right.kind, ast::ExprKind::GenCall { .. }) {
+                    return Err(Error::message(
+                        "Cannot use generator expressions (forall/exists) in equivalence",
+                        right.span,
+                    ));
+                }
                 let left_constraint = self.expr_to_bool_var(left)?;
                 let right_constraint = self.expr_to_bool_var(right)?;
                 
@@ -2236,6 +2447,19 @@ impl Translator {
                                 self.model.element(&arr, zero_based_index, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.int(v, v)
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_bool_var_array(array_name) {
                                 let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                                 let index_minus_one = self.model.sub(index_var, one);
@@ -2244,12 +2468,38 @@ impl Translator {
                                 self.model.element(&arr, zero_based_index, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.bool();
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                                    self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_float_var_array(array_name) {
                                 let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                                 let index_minus_one = self.model.sub(index_var, one);
                                 self.model.new(zero_based_index.eq(index_minus_one));
                                 let result = self.model.float(f64::MIN, f64::MAX);
                                 self.model.element(&arr, zero_based_index, result);
+                                return Ok(result);
+                            }
+                            if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                                // Create element constraint using parameter array values
+                                let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                                let index_minus_one = self.model.sub(index_var, one);
+                                self.model.new(zero_based_index.eq(index_minus_one));
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.float(v, v)
+                                }).collect();
+                                self.model.element(&var_arr, zero_based_index, result);
                                 return Ok(result);
                             }
                             
@@ -2315,14 +2565,41 @@ impl Translator {
                                 self.model.element(&arr, flat_index_var, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.int(v, v)
+                                }).collect();
+                                let result = self.model.int(i32::MIN, i32::MAX);
+                                self.model.element(&var_arr, flat_index_var, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_bool_var_array(array_name) {
                                 let result = self.model.bool();
                                 self.model.element(&arr, flat_index_var, result);
                                 return Ok(result);
                             }
+                            if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                                    self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                                }).collect();
+                                let result = self.model.bool();
+                                self.model.element(&var_arr, flat_index_var, result);
+                                return Ok(result);
+                            }
                             if let Some(arr) = self.context.get_float_var_array(array_name) {
                                 let result = self.model.float(f64::MIN, f64::MAX);
                                 self.model.element(&arr, flat_index_var, result);
+                                return Ok(result);
+                            }
+                            if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                                // Create var array from parameter values
+                                let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                                    self.model.float(v, v)
+                                }).collect();
+                                let result = self.model.float(f64::MIN, f64::MAX);
+                                self.model.element(&var_arr, flat_index_var, result);
                                 return Ok(result);
                             }
                             
@@ -2399,6 +2676,18 @@ impl Translator {
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
                 }
+                if let Some(param_arr) = self.context.get_int_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.int(i32::MIN, i32::MAX);
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                        self.model.int(v, v)
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
+                    return Ok(result);
+                }
                 if let Some(arr) = self.context.get_bool_var_array(array_name) {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
@@ -2407,12 +2696,36 @@ impl Translator {
                     self.model.element(&arr, zero_based_index, result);
                     return Ok(result);
                 }
+                if let Some(param_arr) = self.context.get_bool_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.bool();
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&b| {
+                        self.model.int(if b { 1 } else { 0 }, if b { 1 } else { 0 })
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
+                    return Ok(result);
+                }
                 if let Some(arr) = self.context.get_float_var_array(array_name) {
                     let zero_based_index = self.model.int(0, (arr.len() - 1) as i32);
                     let index_minus_one = self.model.sub(index_var, one);
                     self.model.new(zero_based_index.eq(index_minus_one));
                     let result = self.model.float(f64::MIN, f64::MAX);
                     self.model.element(&arr, zero_based_index, result);
+                    return Ok(result);
+                }
+                if let Some(param_arr) = self.context.get_float_param_array(array_name) {
+                    let zero_based_index = self.model.int(0, (param_arr.len() - 1) as i32);
+                    let index_minus_one = self.model.sub(index_var, one);
+                    self.model.new(zero_based_index.eq(index_minus_one));
+                    let result = self.model.float(f64::MIN, f64::MAX);
+                    // Create var array from parameter values
+                    let var_arr: Vec<VarId> = param_arr.iter().map(|&v| {
+                        self.model.float(v, v)
+                    }).collect();
+                    self.model.element(&var_arr, zero_based_index, result);
                     return Ok(result);
                 }
                 
@@ -2425,6 +2738,10 @@ impl Translator {
                 // Handle aggregate functions
                 self.translate_aggregate_call(name, args, expr.span)
             }
+            ast::ExprKind::GenCall { name, generators, body } => {
+                // Handle generator-based aggregate functions like sum(i in 1..n)(expr)
+                self.translate_gencall_aggregate(name, generators, body, expr.span)
+            }
             _ => Err(Error::unsupported_feature(
                 &format!("Expression type: {:?}", expr.kind),
                 "Phase 2",
@@ -2436,6 +2753,19 @@ impl Translator {
     /// Translate aggregate function calls (sum, min, max, etc.)
     fn translate_aggregate_call(&mut self, name: &str, args: &[ast::Expr], span: ast::Span) -> Result<VarId> {
         match name {
+            "bool2int" => {
+                if args.len() != 1 {
+                    return Err(Error::type_error(
+                        "1 argument",
+                        &format!("{} arguments", args.len()),
+                        span,
+                    ));
+                }
+                
+                // Convert boolean expression to 0/1 integer
+                let bool_var = self.expr_to_bool_var(&args[0])?;
+                Ok(functions::bool2int(&mut self.model, bool_var))
+            }
             "sum" => {
                 if args.len() != 1 {
                     return Err(Error::type_error(
@@ -2573,6 +2903,74 @@ impl Translator {
         }
     }
 
+    /// Translate generator-based aggregate functions like sum(i in 1..n)(expr)
+    fn translate_gencall_aggregate(&mut self, name: &str, generators: &[ast::Generator], body: &ast::Expr, span: ast::Span) -> Result<VarId> {
+        // For aggregations with generators, we need to expand and collect values
+        if generators.len() != 1 {
+            return Err(Error::unsupported_feature(
+                "Multiple generators in aggregation",
+                "Only single generator supported",
+                span,
+            ));
+        }
+        
+        let generator = &generators[0];
+        if generator.names.len() != 1 {
+            return Err(Error::message(
+                "Generator must have exactly one variable",
+                span,
+            ));
+        }
+        
+        let loop_var = &generator.names[0];
+        let (range_start, range_end) = self.parse_range(&generator.expr)?;
+        
+        // Collect values by expanding the loop
+        let mut values = Vec::new();
+        for i in range_start..=range_end {
+            let old_val = self.context.int_params.get(loop_var).copied();
+            self.context.int_params.insert(loop_var.clone(), i);
+            
+            // Evaluate the body expression with this loop value
+            let value = self.get_var_or_value(body)?;
+            values.push(value);
+            
+            if let Some(old) = old_val {
+                self.context.int_params.insert(loop_var.clone(), old);
+            } else {
+                self.context.int_params.remove(loop_var);
+            }
+        }
+        
+        // Now apply the aggregation function to the collected values
+        match name {
+            "sum" => Ok(self.model.sum(&values)),
+            "min" => self.model.min(&values).map_err(|e| Error::message(
+                &format!("min() requires at least one variable: {:?}", e),
+                span,
+            )),
+            "max" => self.model.max(&values).map_err(|e| Error::message(
+                &format!("max() requires at least one variable: {:?}", e),
+                span,
+            )),
+            "product" => {
+                if values.is_empty() {
+                    return Err(Error::message("product() requires at least one value", span));
+                }
+                let mut result = values[0];
+                for &val in &values[1..] {
+                    result = self.model.mul(result, val);
+                }
+                Ok(result)
+            }
+            _ => Err(Error::unsupported_feature(
+                &format!("Aggregation function '{}'", name),
+                "Phase 2",
+                span,
+            )),
+        }
+    }
+
     /// Get array variables from an expression (handles identifiers and literals)
     fn get_array_vars(&mut self, expr: &ast::Expr) -> Result<Vec<VarId>> {
         match &expr.kind {
@@ -2641,6 +3039,119 @@ impl Translator {
             }
             _ => Err(Error::message(
                 "Cannot evaluate expression at compile time",
+                expr.span,
+            )),
+        }
+    }
+
+    /// Extract an integer array from an expression (either a parameter array or a literal array)
+    fn extract_int_array(&self, expr: &ast::Expr) -> Result<Vec<i32>> {
+        match &expr.kind {
+            ast::ExprKind::Ident(name) => {
+                // Try to get a parameter array
+                if let Some(values) = self.context.get_int_param_array(name) {
+                    Ok(values.clone())
+                } else {
+                    Err(Error::message(
+                        &format!("Undefined parameter array: {}", name),
+                        expr.span,
+                    ))
+                }
+            }
+            ast::ExprKind::ArrayLit(elements) => {
+                // Evaluate each element
+                let mut result = Vec::new();
+                for elem in elements {
+                    result.push(self.eval_int_expr(elem)?);
+                }
+                Ok(result)
+            }
+            _ => Err(Error::message(
+                "Expected array (parameter array or array literal)",
+                expr.span,
+            )),
+        }
+    }
+
+    /// Extract a 2D integer array from an expression
+    /// Supports: array2d() calls and direct nested array literals [[...], [...], ...]
+    /// Limitation: 2D parameter arrays (array[1..n, 1..m] of int) not supported
+    fn extract_int_array_2d(&self, expr: &ast::Expr) -> Result<Vec<Vec<i32>>> {
+        match &expr.kind {
+            ast::ExprKind::Ident(name) => {
+                // Try to get a parameter array - but we need it as 2D
+                // Limitation: Context doesn't track 2D parameter arrays, only 1D flattened arrays
+                // To support 2D parameters, the Context struct would need a HashMap for 2D arrays
+                Err(Error::message(
+                    &format!("2D parameter arrays not yet supported: '{}'. Use array2d() calls or nested array literals instead.", name),
+                    expr.span,
+                ))
+            }
+            ast::ExprKind::Call { name, args } => {
+                // Could be array2d(row_range, col_range, values)
+                if name == "array2d" && args.len() == 3 {
+                    // Extract the flat values array (third argument)
+                    let values = self.extract_int_array(&args[2])?;
+                    
+                    // Extract row and column counts
+                    let (row_start, row_end) = self.parse_range(&args[0])?;
+                    let (col_start, col_end) = self.parse_range(&args[1])?;
+                    
+                    let num_rows = (row_end - row_start + 1) as usize;
+                    let num_cols = (col_end - col_start + 1) as usize;
+                    
+                    // Validate total size
+                    if values.len() != num_rows * num_cols {
+                        return Err(Error::message(
+                            &format!(
+                                "array2d: expected {} values for {}x{} array, got {}",
+                                num_rows * num_cols,
+                                num_rows,
+                                num_cols,
+                                values.len()
+                            ),
+                            expr.span,
+                        ));
+                    }
+                    
+                    // Convert flat array to 2D
+                    let mut result = Vec::new();
+                    for i in 0..num_rows {
+                        let row = values[i * num_cols..(i + 1) * num_cols].to_vec();
+                        result.push(row);
+                    }
+                    Ok(result)
+                } else {
+                    Err(Error::message(
+                        "Expected array2d(...) call for 2D array",
+                        expr.span,
+                    ))
+                }
+            }
+            ast::ExprKind::ArrayLit(rows) => {
+                // Direct 2D array literal: [[...], [...], ...]
+                let mut result = Vec::new();
+                for row_expr in rows {
+                    match &row_expr.kind {
+                        ast::ExprKind::ArrayLit(cols) => {
+                            let mut row = Vec::new();
+                            for col_expr in cols {
+                                row.push(self.eval_int_expr(col_expr)?);
+                            }
+                            result.push(row);
+                        }
+                        _ => {
+                            return Err(Error::message(
+                                "Expected nested array literal for 2D array",
+                                row_expr.span,
+                            ))
+                        }
+                    }
+                }
+                Ok(result)
+            }
+            _ => Err(Error::message(
+                "Expected 2D array (array2d or nested array literal)",
                 expr.span,
             )),
         }

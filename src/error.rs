@@ -14,6 +14,7 @@ pub struct Error {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum ErrorKind {
     // Lexer errors
     UnexpectedChar(char),
